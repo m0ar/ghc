@@ -1,5 +1,5 @@
 {-# LANGUAGE BangPatterns, MagicHash, UnboxedTuples #-}
-{-# OPTIONS_GHC -O #-}
+{-# OPTIONS_GHC -O2 #-}
 -- We always optimise this, otherwise performance of a non-optimised
 -- compiler is severely affected
 
@@ -17,7 +17,8 @@ module Encoding (
         utf8PrevChar,
         utf8CharStart,
         utf8DecodeChar,
-        utf8DecodeString,
+        utf8DecodeByteString,
+        utf8DecodeStringLazy,
         utf8EncodeChar,
         utf8EncodeString,
         utf8EncodedLength,
@@ -32,10 +33,18 @@ module Encoding (
         toBase62Padded
   ) where
 
+import GhcPrelude
+
 import Foreign
+import Foreign.ForeignPtr.Unsafe
 import Data.Char
 import qualified Data.Char as Char
 import Numeric
+import GHC.IO
+
+import Data.ByteString (ByteString)
+import qualified Data.ByteString.Internal as BS
+
 import GHC.Exts
 
 -- -----------------------------------------------------------------------------
@@ -115,19 +124,24 @@ utf8CharStart p = go p
                         then go (p `plusPtr` (-1))
                         else return p
 
-utf8DecodeString :: Ptr Word8 -> Int -> IO [Char]
-utf8DecodeString ptr len
-  = unpack ptr
+utf8DecodeByteString :: ByteString -> [Char]
+utf8DecodeByteString (BS.PS ptr offset len)
+  = utf8DecodeStringLazy ptr offset len
+
+utf8DecodeStringLazy :: ForeignPtr Word8 -> Int -> Int -> [Char]
+utf8DecodeStringLazy fptr offset len
+  = unsafeDupablePerformIO $ unpack start
   where
-    !end = ptr `plusPtr` len
+    !start = unsafeForeignPtrToPtr fptr `plusPtr` offset
+    !end = start `plusPtr` len
 
     unpack p
-        | p >= end = return []
-        | otherwise  =
-        case utf8DecodeChar# (unPtr p) of
-           (# c#, nBytes# #) -> do
-                chs <- unpack (p `plusPtr#` nBytes#)
-                return (C# c# : chs)
+        | p >= end  = touchForeignPtr fptr >> return []
+        | otherwise =
+            case utf8DecodeChar# (unPtr p) of
+                (# c#, nBytes# #) -> do
+                  rest <- unsafeDupableInterleaveIO $ unpack (p `plusPtr#` nBytes#)
+                  return (C# c# : rest)
 
 countUTF8Chars :: Ptr Word8 -> Int -> IO Int
 countUTF8Chars ptr len = go ptr 0

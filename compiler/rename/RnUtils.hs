@@ -26,6 +26,8 @@ module RnUtils (
 where
 
 
+import GhcPrelude
+
 import HsSyn
 import RdrName
 import HscTypes
@@ -45,6 +47,7 @@ import FastString
 import Control.Monad
 import Data.List
 import Constants        ( mAX_TUPLE_SIZE )
+import qualified Data.List.NonEmpty as NE
 import qualified GHC.LanguageExtensions as LangExt
 
 {-
@@ -90,7 +93,6 @@ bindLocalNamesFV names enclosed_scope
 -------------------------------------
 
 extendTyVarEnvFVRn :: [Name] -> RnM (a, FreeVars) -> RnM (a, FreeVars)
-        -- This function is used only in rnSourceDecl on InstDecl
 extendTyVarEnvFVRn tyvars thing_inside = bindLocalNamesFV tyvars thing_inside
 
 -------------------------------------
@@ -317,13 +319,13 @@ unknownSubordinateErr doc op    -- Doc is "method of class" or
   = quotes (ppr op) <+> text "is not a (visible)" <+> doc
 
 
-dupNamesErr :: Outputable n => (n -> SrcSpan) -> [n] -> RnM ()
+dupNamesErr :: Outputable n => (n -> SrcSpan) -> NE.NonEmpty n -> RnM ()
 dupNamesErr get_loc names
   = addErrAt big_loc $
-    vcat [text "Conflicting definitions for" <+> quotes (ppr (head names)),
+    vcat [text "Conflicting definitions for" <+> quotes (ppr (NE.head names)),
           locations]
   where
-    locs      = map get_loc names
+    locs      = map get_loc (NE.toList names)
     big_loc   = foldr1 combineSrcSpans locs
     locations = text "Bound at:" <+> vcat (map ppr (sort locs))
 
@@ -340,6 +342,7 @@ checkTupSize tup_size
   = addErr (sep [text "A" <+> int tup_size <> ptext (sLit "-tuple is too large for GHC"),
                  nest 2 (parens (text "max size is" <+> int mAX_TUPLE_SIZE)),
                  nest 2 (text "Workaround: use nested tuples or define a data type")])
+
 
 {-
 ************************************************************************
@@ -369,7 +372,7 @@ data HsDocContext
   | TypBrCtx
   | HsTypeCtx
   | GHCiCtx
-  | SpliceTypeCtx (LHsType RdrName)
+  | SpliceTypeCtx (LHsType GhcPs)
   | ClassInstanceCtx
   | VectDeclCtx (Located RdrName)
   | GenericCtx SDoc   -- Maybe we want to use this more!

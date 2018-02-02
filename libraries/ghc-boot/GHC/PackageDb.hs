@@ -98,8 +98,7 @@ data InstalledPackageInfo compid srcpkgid srcpkgname instunitid unitid modulenam
        sourcePackageId    :: srcpkgid,
        packageName        :: srcpkgname,
        packageVersion     :: Version,
-       mungedPackageName  :: Maybe srcpkgname,
-       libName            :: Maybe srcpkgname,
+       sourceLibName      :: Maybe srcpkgname,
        abiHash            :: String,
        depends            :: [instunitid],
        -- | Like 'depends', but each dependency is annotated with the
@@ -184,8 +183,7 @@ emptyInstalledPackageInfo =
        sourcePackageId    = fromStringRep BS.empty,
        packageName        = fromStringRep BS.empty,
        packageVersion     = Version [] [],
-       mungedPackageName  = Nothing,
-       libName            = Nothing,
+       sourceLibName      = Nothing,
        abiHash            = "",
        depends            = [],
        abiDepends         = [],
@@ -241,15 +239,21 @@ lockPackageDbWith mode file = do
   -- DB for reading then we will require that the installer/packaging has
   -- included the lock file.
   --
-  -- Thus the logic here is to first try opening in read-only mode (to handle
-  -- global read-only DBs) and if the file does not exist then try opening in
-  -- read/write mode to create the lock file. If either succeed then lock the
-  -- file. IO exceptions (other than the first open attempt failing due to the
-  -- file not existing) simply propagate.
+  -- Thus the logic here is to first try opening in read-write mode
+  -- and if that fails we try read-only (to handle global read-only DBs).
+  -- If either succeed then lock the file. IO exceptions (other than the first
+  -- open attempt failing due to the file not existing) simply propagate.
+  --
+  -- Note that there is a complexity here which was discovered in #13945: some
+  -- filesystems (e.g. NFS) will only allow exclusive locking if the fd was
+  -- opened for write access. We would previously try opening the lockfile for
+  -- read-only access first, however this failed when run on such filesystems.
+  -- Consequently, we now try read-write access first, falling back to read-only
+  -- if we are denied permission (e.g. in the case of a global database).
   catchJust
-    (\e -> if isDoesNotExistError e then Just () else Nothing)
-    (lockFileOpenIn ReadMode)
-    (const $ lockFileOpenIn ReadWriteMode)
+    (\e -> if isPermissionError e then Just () else Nothing)
+    (lockFileOpenIn ReadWriteMode)
+    (const $ lockFileOpenIn ReadMode)
   where
     lock = file <.> "lock"
 
@@ -263,7 +267,11 @@ lockPackageDbWith mode file = do
                    return $ PackageDbLock hnd
 
 lockPackageDb = lockPackageDbWith ExclusiveLock
-unlockPackageDb (PackageDbLock hnd) = hClose hnd
+unlockPackageDb (PackageDbLock hnd) = do
+#if MIN_VERSION_base(4,11,0)
+    hUnlock hnd
+#endif
+    hClose hnd
 
 -- MIN_VERSION_base(4,10,0)
 #else
@@ -444,7 +452,7 @@ instance (RepInstalledPackageInfo a b c d e f g) =>
   put (InstalledPackageInfo
          unitId componentId instantiatedWith sourcePackageId
          packageName packageVersion
-         mungedPackageName libName
+         sourceLibName
          abiHash depends abiDepends importDirs
          hsLibraries extraLibraries extraGHCiLibraries
          libraryDirs libraryDynDirs
@@ -457,8 +465,7 @@ instance (RepInstalledPackageInfo a b c d e f g) =>
     put (toStringRep sourcePackageId)
     put (toStringRep packageName)
     put packageVersion
-    put (fmap toStringRep mungedPackageName)
-    put (fmap toStringRep libName)
+    put (fmap toStringRep sourceLibName)
     put (toStringRep unitId)
     put (toStringRep componentId)
     put (map (\(mod_name, mod) -> (toStringRep mod_name, toDbModule mod))
@@ -491,8 +498,7 @@ instance (RepInstalledPackageInfo a b c d e f g) =>
     sourcePackageId    <- get
     packageName        <- get
     packageVersion     <- get
-    mungedPackageName  <- get
-    libName            <- get
+    sourceLibName      <- get
     unitId             <- get
     componentId        <- get
     instantiatedWith   <- get
@@ -525,8 +531,7 @@ instance (RepInstalledPackageInfo a b c d e f g) =>
                 instantiatedWith)
               (fromStringRep sourcePackageId)
               (fromStringRep packageName) packageVersion
-              (fmap fromStringRep mungedPackageName)
-              (fmap fromStringRep libName)
+              (fmap fromStringRep sourceLibName)
               abiHash
               (map fromStringRep depends)
               (map (\(k,v) -> (fromStringRep k, v)) abiDepends)

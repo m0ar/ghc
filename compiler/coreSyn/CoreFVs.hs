@@ -31,7 +31,7 @@ module CoreFVs (
         varTypeTyCoVars,
         varTypeTyCoFVs,
         idUnfoldingVars, idFreeVars, dIdFreeVars,
-        idRuleAndUnfoldingVars, idRuleAndUnfoldingVarsDSet,
+        bndrRuleAndUnfoldingVarsDSet,
         idFVs,
         idRuleVars, idRuleRhsVars, stableUnfoldingVars,
         ruleRhsFreeVars, ruleFreeVars, rulesFreeVars,
@@ -59,6 +59,8 @@ module CoreFVs (
     ) where
 
 #include "HsVersions.h"
+
+import GhcPrelude
 
 import CoreSyn
 import Id
@@ -384,13 +386,13 @@ orphNamesOfCo (CoherenceCo co1 co2) = orphNamesOfCo co1 `unionNameSet` orphNames
 orphNamesOfCo (KindCo co)           = orphNamesOfCo co
 orphNamesOfCo (SubCo co)            = orphNamesOfCo co
 orphNamesOfCo (AxiomRuleCo _ cs)    = orphNamesOfCos cs
+orphNamesOfCo (HoleCo _)            = emptyNameSet
 
 orphNamesOfProv :: UnivCoProvenance -> NameSet
 orphNamesOfProv UnsafeCoerceProv    = emptyNameSet
 orphNamesOfProv (PhantomProv co)    = orphNamesOfCo co
 orphNamesOfProv (ProofIrrelProv co) = orphNamesOfCo co
 orphNamesOfProv (PluginProv _)      = emptyNameSet
-orphNamesOfProv (HoleProv _)        = emptyNameSet
 
 orphNamesOfCos :: [Coercion] -> NameSet
 orphNamesOfCos = orphNamesOfThings orphNamesOfCo
@@ -626,22 +628,15 @@ idFVs :: Id -> FV
 -- Type variables, rule variables, and inline variables
 idFVs id = ASSERT( isId id)
            varTypeTyCoFVs id `unionFV`
-           idRuleAndUnfoldingFVs id
+           bndrRuleAndUnfoldingFVs id
 
-bndrRuleAndUnfoldingFVs :: Var -> FV
-bndrRuleAndUnfoldingFVs v | isTyVar v = emptyFV
-                          | otherwise = idRuleAndUnfoldingFVs v
+bndrRuleAndUnfoldingVarsDSet :: Id -> DVarSet
+bndrRuleAndUnfoldingVarsDSet id = fvDVarSet $ bndrRuleAndUnfoldingFVs id
 
-idRuleAndUnfoldingVars :: Id -> VarSet
-idRuleAndUnfoldingVars id = fvVarSet $ idRuleAndUnfoldingFVs id
-
-idRuleAndUnfoldingVarsDSet :: Id -> DVarSet
-idRuleAndUnfoldingVarsDSet id = fvDVarSet $ idRuleAndUnfoldingFVs id
-
-idRuleAndUnfoldingFVs :: Id -> FV
-idRuleAndUnfoldingFVs id = ASSERT( isId id)
-                           idRuleFVs id `unionFV` idUnfoldingFVs id
-
+bndrRuleAndUnfoldingFVs :: Id -> FV
+bndrRuleAndUnfoldingFVs id
+  | isId id   = idRuleFVs id `unionFV` idUnfoldingFVs id
+  | otherwise = emptyFV
 
 idRuleVars ::Id -> VarSet  -- Does *not* include CoreUnfolding vars
 idRuleVars id = fvVarSet $ idRuleFVs id
@@ -690,7 +685,7 @@ freeVarsBind :: CoreBind
 freeVarsBind (NonRec binder rhs) body_fvs
   = ( AnnNonRec binder rhs2
     , freeVarsOf rhs2 `unionFVs` body_fvs2
-                      `unionFVs` fvDVarSet (bndrRuleAndUnfoldingFVs binder) )
+                      `unionFVs` bndrRuleAndUnfoldingVarsDSet binder )
     where
       rhs2      = freeVars rhs
       body_fvs2 = binder `delBinderFV` body_fvs
@@ -702,7 +697,7 @@ freeVarsBind (Rec binds) body_fvs
     (binders, rhss) = unzip binds
     rhss2        = map freeVars rhss
     rhs_body_fvs = foldr (unionFVs . freeVarsOf) body_fvs rhss2
-    binders_fvs  = fvDVarSet $ mapUnionFV idRuleAndUnfoldingFVs binders
+    binders_fvs  = fvDVarSet $ mapUnionFV bndrRuleAndUnfoldingFVs binders
     all_fvs      = rhs_body_fvs `unionFVs` binders_fvs
             -- The "delBinderFV" happens after adding the idSpecVars,
             -- since the latter may add some of the binders as fvs

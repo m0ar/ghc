@@ -9,7 +9,7 @@
 module CoreMonad (
     -- * Configuration of the core-to-core passes
     CoreToDo(..), runWhen, runMaybe,
-    SimplifierMode(..),
+    SimplMode(..),
     FloatOutSwitches(..),
     pprPassDetails,
 
@@ -53,6 +53,8 @@ module CoreMonad (
     thNameToGhcName
   ) where
 
+import GhcPrelude hiding ( read )
+
 import Name( Name )
 import TcRnMonad        ( initTcForLookup )
 import CoreSyn
@@ -70,7 +72,6 @@ import Outputable
 import FastString
 import qualified ErrUtils as Err
 import ErrUtils( Severity(..) )
-import Maybes
 import UniqSupply
 import UniqFM       ( UniqFM, mapUFM, filterUFM )
 import MonadUtils
@@ -86,8 +87,6 @@ import qualified Data.Map.Strict as MapStrict
 import Data.Word
 import Control.Monad
 import Control.Applicative ( Alternative(..) )
-
-import Prelude hiding   ( read )
 
 import {-# SOURCE #-} TcSplice ( lookupThName_maybe )
 import qualified Language.Haskell.TH as TH
@@ -107,7 +106,7 @@ data CoreToDo           -- These are diff core-to-core passes,
 
   = CoreDoSimplify      -- The core-to-core simplifier.
         Int                    -- Max iterations
-        SimplifierMode
+        SimplMode
   | CoreDoPluginPass String PluginPass
   | CoreDoFloatInwards
   | CoreDoFloatOutwards FloatOutSwitches
@@ -115,6 +114,7 @@ data CoreToDo           -- These are diff core-to-core passes,
   | CoreDoPrintCore
   | CoreDoStaticArgs
   | CoreDoCallArity
+  | CoreDoExitify
   | CoreDoStrictness
   | CoreDoWorkerWrapper
   | CoreDoSpecialising
@@ -142,6 +142,7 @@ instance Outputable CoreToDo where
   ppr CoreLiberateCase         = text "Liberate case"
   ppr CoreDoStaticArgs         = text "Static argument"
   ppr CoreDoCallArity          = text "Called arity analysis"
+  ppr CoreDoExitify            = text "Exitification transformation"
   ppr CoreDoStrictness         = text "Demand analysis"
   ppr CoreDoWorkerWrapper      = text "Worker Wrapper binds"
   ppr CoreDoSpecialising       = text "Specialise"
@@ -163,17 +164,19 @@ pprPassDetails (CoreDoSimplify n md) = vcat [ text "Max iterations =" <+> int n
                                             , ppr md ]
 pprPassDetails _ = Outputable.empty
 
-data SimplifierMode             -- See comments in SimplMonad
+data SimplMode             -- See comments in SimplMonad
   = SimplMode
         { sm_names      :: [String] -- Name(s) of the phase
         , sm_phase      :: CompilerPhase
+        , sm_dflags     :: DynFlags -- Just for convenient non-monadic
+                                    -- access; we don't override these
         , sm_rules      :: Bool     -- Whether RULES are enabled
         , sm_inline     :: Bool     -- Whether inlining is enabled
         , sm_case_case  :: Bool     -- Whether case-of-case is enabled
         , sm_eta_expand :: Bool     -- Whether eta-expansion is enabled
         }
 
-instance Outputable SimplifierMode where
+instance Outputable SimplMode where
     ppr (SimplMode { sm_phase = p, sm_names = ss
                    , sm_rules = r, sm_inline = i
                    , sm_eta_expand = eta, sm_case_case = cc })
@@ -251,7 +254,7 @@ bindsOnlyPass pass guts
 -}
 
 getVerboseSimplStats :: (Bool -> SDoc) -> SDoc
-getVerboseSimplStats = sdocWithPprDebug          -- For now, anyway
+getVerboseSimplStats = getPprDebug          -- For now, anyway
 
 zeroSimplCount     :: DynFlags -> SimplCount
 isZeroSimplCount   :: SimplCount -> Bool

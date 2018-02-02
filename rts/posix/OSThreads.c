@@ -9,9 +9,9 @@
 
 #include "PosixSource.h"
 
-#if defined(freebsd_HOST_OS)
-/* Inclusion of system headers usually requires __BSD_VISIBLE on FreeBSD,
- * because of some specific types, like u_char, u_int, etc. */
+#if defined(freebsd_HOST_OS) || defined(dragonfly_HOST_OS)
+/* Inclusion of system headers usually requires __BSD_VISIBLE on FreeBSD and
+ * DragonflyBSD, because of some specific types, like u_char, u_int, etc. */
 #define __BSD_VISIBLE   1
 #endif
 #if defined(darwin_HOST_OS)
@@ -62,7 +62,7 @@
 #include <sys/cpuset.h>
 #endif
 
-#ifdef HAVE_UNISTD_H
+#if defined(HAVE_UNISTD_H)
 #include <unistd.h>
 #endif
 
@@ -70,11 +70,11 @@
 #include <mach/mach.h>
 #endif
 
-#ifdef HAVE_SIGNAL_H
+#if defined(HAVE_SIGNAL_H)
 # include <signal.h>
 #endif
 
-#ifdef HAVE_NUMA_H
+#if defined(HAVE_NUMA_H)
 #include <numa.h>
 #endif
 
@@ -137,7 +137,7 @@ createOSThread (OSThreadId* pId, char *name STG_UNUSED,
   int result = pthread_create(pId, NULL, (void *(*)(void *))startProc, param);
   if (!result) {
     pthread_detach(*pId);
-#if HAVE_PTHREAD_SETNAME_NP
+#if defined(HAVE_PTHREAD_SETNAME_NP)
     pthread_setname_np(*pId, name);
 #endif
   }
@@ -223,6 +223,7 @@ forkOS_createThreadWrapper ( void * entry )
     cap = rts_lock();
     rts_evalStableIO(&cap, (HsStablePtr) entry, NULL);
     rts_unlock(cap);
+    rts_done();
     return NULL;
 }
 

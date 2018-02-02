@@ -9,6 +9,7 @@ module Cmm (
      CmmBlock,
      RawCmmDecl, RawCmmGroup,
      Section(..), SectionType(..), CmmStatics(..), CmmStatic(..),
+     isSecConstant,
 
      -- ** Blocks containing lists
      GenBasicBlock(..), blockId,
@@ -25,12 +26,17 @@ module Cmm (
      module CmmExpr,
   ) where
 
+import GhcPrelude
+
 import CLabel
 import BlockId
 import CmmNode
 import SMRep
 import CmmExpr
-import Compiler.Hoopl
+import Hoopl.Block
+import Hoopl.Collections
+import Hoopl.Graph
+import Hoopl.Label
 import Outputable
 
 import Data.Word        ( Word8 )
@@ -166,6 +172,18 @@ data SectionType
   | CString
   | OtherSection String
   deriving (Show)
+
+-- | Should a data in this section be considered constant
+isSecConstant :: Section -> Bool
+isSecConstant (Section t _) = case t of
+    Text                    -> True
+    ReadOnlyData            -> True
+    RelocatableReadOnlyData -> True
+    ReadOnlyData16          -> True
+    CString                 -> True
+    Data                    -> False
+    UninitialisedData       -> False
+    (OtherSection _)        -> False
 
 data Section = Section SectionType CLabel
 

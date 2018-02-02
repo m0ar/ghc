@@ -55,6 +55,7 @@ module UniqFM (
         intersectUFM,
         intersectUFM_C,
         disjointUFM,
+        equalKeysUFM,
         nonDetFoldUFM, foldUFM, nonDetFoldUFM_Directly,
         anyUFM, allUFM, seqEltsUFM,
         mapUFM, mapUFM_Directly,
@@ -70,19 +71,23 @@ module UniqFM (
         pprUniqFM, pprUFM, pprUFMWithKeys, pluralUFM
     ) where
 
+import GhcPrelude
+
 import Unique           ( Uniquable(..), Unique, getKey )
 import Outputable
 
 import Data.List (foldl')
 
 import qualified Data.IntMap as M
+#if MIN_VERSION_containers(0,5,9)
+import qualified Data.IntMap.Merge.Lazy as M
+import Control.Applicative (Const (..))
+import qualified Data.Monoid as Mon
+#endif
 import qualified Data.IntSet as S
 import Data.Typeable
 import Data.Data
-#if __GLASGOW_HASKELL__ > 710
-import Data.Semigroup   ( Semigroup )
-import qualified Data.Semigroup as Semigroup
-#endif
+import qualified Data.Semigroup as Semi
 
 
 newtype UniqFM ele = UFM (M.IntMap ele)
@@ -339,16 +344,25 @@ nonDetUFMToList (UFM m) = map (\(k, v) -> (getUnique k, v)) $ M.toList m
 ufmToIntMap :: UniqFM elt -> M.IntMap elt
 ufmToIntMap (UFM m) = m
 
+-- Determines whether two 'UniqFm's contain the same keys.
+equalKeysUFM :: UniqFM a -> UniqFM b -> Bool
+#if MIN_VERSION_containers(0,5,9)
+equalKeysUFM (UFM m1) (UFM m2) = Mon.getAll $ getConst $
+      M.mergeA (M.traverseMissing (\_ _ -> Const (Mon.All False)))
+               (M.traverseMissing (\_ _ -> Const (Mon.All False)))
+               (M.zipWithAMatched (\_ _ _ -> Const (Mon.All True))) m1 m2
+#else
+equalKeysUFM (UFM m1) (UFM m2) = M.keys m1 == M.keys m2
+#endif
+
 -- Instances
 
-#if __GLASGOW_HASKELL__ > 710
-instance Semigroup (UniqFM a) where
+instance Semi.Semigroup (UniqFM a) where
   (<>) = plusUFM
-#endif
 
 instance Monoid (UniqFM a) where
     mempty = emptyUFM
-    mappend = plusUFM
+    mappend = (Semi.<>)
 
 -- Output-ery
 

@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE BangPatterns #-}
 {-# OPTIONS_GHC -fno-warn-incomplete-patterns #-}
 module CmmContFlowOpt
     ( cmmCfgOpts
@@ -8,16 +9,21 @@ module CmmContFlowOpt
     )
 where
 
-import Hoopl
+import GhcPrelude hiding (succ, unzip, zip)
+
+import Hoopl.Block
+import Hoopl.Collections
+import Hoopl.Graph
+import Hoopl.Label
 import BlockId
 import Cmm
 import CmmUtils
 import CmmSwitch (mapSwitchTargets)
 import Maybes
 import Panic
+import Util
 
 import Control.Monad
-import Prelude hiding (succ, unzip, zip)
 
 
 -- Note [What is shortcutting]
@@ -49,7 +55,7 @@ import Prelude hiding (succ, unzip, zip)
 --
 -- This optimisation does three things:
 --
---   - If a block finishes in an unconditonal branch to another block
+--   - If a block finishes in an unconditional branch to another block
 --     and that is the only jump to that block we concatenate the
 --     destination block at the end of the current one.
 --
@@ -190,7 +196,7 @@ blockConcat splitting_procs g@CmmGraph { g_entry = entry_id }
      maybe_concat :: CmmBlock
                   -> (LabelMap CmmBlock, LabelMap BlockId, LabelMap Int)
                   -> (LabelMap CmmBlock, LabelMap BlockId, LabelMap Int)
-     maybe_concat block (blocks, shortcut_map, backEdges)
+     maybe_concat block (!blocks, !shortcut_map, !backEdges)
         -- If:
         --   (1) current block ends with unconditional branch to b' and
         --   (2) it has exactly one predecessor (namely, current block)
@@ -277,33 +283,52 @@ blockConcat splitting_procs g@CmmGraph { g_entry = entry_id }
                    Just b | Just dest <- canShortcut b -> dest
                    _otherwise -> l
 
-          -- For a conditional, we invert the conditional if that would make it
-          -- more likely that the branch-not-taken case becomes a fallthrough.
-          -- This helps the native codegen a little bit, and probably has no
-          -- effect on LLVM.  It's convenient to do it here, where we have the
-          -- information about predecessors.
+          -- See Note [Invert Cmm conditionals]
           swapcond_last
             | CmmCondBranch cond t f l <- shortcut_last
-            , likelyFalse l
-            , numPreds f > 1
-            , hasOnePredecessor t
+            , hasOnePredecessor t -- inverting will make t a fallthrough
+            , likelyTrue l || (numPreds f > 1)
             , Just cond' <- maybeInvertCmmExpr cond
             = CmmCondBranch cond' f t (invertLikeliness l)
 
             | otherwise
             = shortcut_last
 
-          likelyFalse (Just False) = True
-          likelyFalse Nothing      = True
-          likelyFalse _            = False
+          likelyTrue (Just True)   = True
+          likelyTrue _             = False
 
-          invertLikeliness (Just b)     = Just (not b)
-          invertLikeliness Nothing      = Nothing
+          invertLikeliness :: Maybe Bool -> Maybe Bool
+          invertLikeliness         = fmap not
 
           -- Number of predecessors for a block
           numPreds bid = mapLookup bid backEdges `orElse` 0
 
           hasOnePredecessor b = numPreds b == 1
+
+{-
+  Note [Invert Cmm conditionals]
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  The native code generator always produces jumps to the true branch.
+  Falling through to the false branch is however faster. So we try to
+  arrange for that to happen.
+  This means we invert the condition if:
+  * The likely path will become a fallthrough.
+  * We can't guarantee a fallthrough for the false branch but for the
+    true branch.
+
+  In some cases it's faster to avoid inverting when the false branch is likely.
+  However determining when that is the case is neither easy nor cheap so for
+  now we always invert as this produces smaller binaries and code that is
+  equally fast on average. (On an i7-6700K)
+
+  TODO:
+  There is also the edge case when both branches have multiple predecessors.
+  In this case we could assume that we will end up with a jump for BOTH
+  branches. In this case it might be best to put the likely path in the true
+  branch especially if there are large numbers of predecessors as this saves
+  us the jump thats not taken. However I haven't tested this and as of early
+  2018 we almost never generate cmm where this would apply.
+-}
 
 -- Functions for incrementing and decrementing number of predecessors. If
 -- decrementing would set the predecessor count to 0, we remove entry from the
@@ -392,7 +417,7 @@ predMap blocks = foldr add_preds mapEmpty blocks
 -- Removing unreachable blocks
 removeUnreachableBlocksProc :: CmmDecl -> CmmDecl
 removeUnreachableBlocksProc proc@(CmmProc info lbl live g)
-   | length used_blocks < mapSize (toBlockMap g)
+   | used_blocks `lengthLessThan` mapSize (toBlockMap g)
    = CmmProc info' lbl live g'
    | otherwise
    = proc
@@ -412,4 +437,4 @@ removeUnreachableBlocksProc proc@(CmmProc info lbl live g)
      used_blocks = postorderDfs g
 
      used_lbls :: LabelSet
-     used_lbls = foldr (setInsert . entryLabel) setEmpty used_blocks
+     used_lbls = setFromList $ map entryLabel used_blocks

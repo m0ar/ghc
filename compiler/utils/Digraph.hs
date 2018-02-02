@@ -40,6 +40,8 @@ module Digraph(
 ------------------------------------------------------------------------------
 
 
+import GhcPrelude
+
 import Util        ( minWith, count )
 import Outputable
 import Maybes      ( expectJust )
@@ -98,6 +100,9 @@ data Node key payload = DigraphNode {
      -- The [key] are the dependencies of the node;
      --    it's ok to have extra keys in the dependencies that
      --    are not the key of any Node in the graph
+
+instance (Outputable a, Outputable b) => Outputable (Node  a b) where
+  ppr (DigraphNode a b c) = ppr (a, b, c)
 
 emptyGraph :: Graph a
 emptyGraph = Graph (array (1, 0) []) (error "emptyGraph") (const Nothing)
@@ -311,7 +316,7 @@ stronglyConnCompFromEdgedVerticesUniq
   = map (fmap node_payload) . stronglyConnCompFromEdgedVerticesUniqR
 
 -- The "R" interface is used when you expect to apply SCC to
--- (some of) the result of SCC, so you dont want to lose the dependency info
+-- (some of) the result of SCC, so you don't want to lose the dependency info
 -- See Note [Deterministic SCC]
 -- See Note [reduceNodesIntoVertices implementations]
 stronglyConnCompFromEdgedVerticesOrdR
@@ -322,7 +327,7 @@ stronglyConnCompFromEdgedVerticesOrdR =
   stronglyConnCompG . graphFromEdgedVertices reduceNodesIntoVerticesOrd
 
 -- The "R" interface is used when you expect to apply SCC to
--- (some of) the result of SCC, so you dont want to lose the dependency info
+-- (some of) the result of SCC, so you don't want to lose the dependency info
 -- See Note [Deterministic SCC]
 -- See Note [reduceNodesIntoVertices implementations]
 stronglyConnCompFromEdgedVerticesUniqR

@@ -47,6 +47,8 @@ module PIC (
 
 where
 
+import GhcPrelude
+
 import qualified PPC.Instr      as PPC
 import qualified PPC.Regs       as PPC
 
@@ -58,7 +60,7 @@ import Reg
 import NCGMonad
 
 
-import Hoopl
+import Hoopl.Collections
 import Cmm
 import CLabel           ( CLabel, ForeignLabelSource(..), pprCLabel,
                           mkDynamicLinkerLabel, DynamicLinkerLabelInfo(..),
@@ -176,7 +178,7 @@ cmmMakePicReference dflags lbl
                                 (platformOS     $ targetPlatform dflags)
                                 lbl ]
 
-        | (gopt Opt_PIC dflags || WayDyn `elem` ways dflags) && absoluteLabel lbl
+        | (positionIndependent dflags || WayDyn `elem` ways dflags) && absoluteLabel lbl
         = CmmMachOp (MO_Add (wordWidth dflags))
                 [ CmmReg (CmmGlobal PicBaseReg)
                 , CmmLit $ picRelative
@@ -272,7 +274,7 @@ howToAccessLabel dflags arch OSDarwin this_mod DataReference lbl
         -- we'd need to pass the current Module all the way in to
         -- this function.
         | arch /= ArchX86_64
-        , gopt Opt_PIC dflags && externallyVisibleCLabel lbl
+        , positionIndependent dflags && externallyVisibleCLabel lbl
         = AccessViaSymbolPtr
 
         | otherwise
@@ -313,8 +315,8 @@ howToAccessLabel _dflags _arch OSAIX _this_mod kind _lbl
 --
 -- ELF tries to pretend to the main application code that dynamic linking does
 -- not exist. While this may sound convenient, it tends to mess things up in
--- very bad ways, so we have to be careful when we generate code for the main
--- program (-dynamic but no -fPIC).
+-- very bad ways, so we have to be careful when we generate code for a non-PIE
+-- main program (-dynamic but no -fPIC).
 --
 -- Indirect access is required for references to imported symbols
 -- from position independent code. It is also required from the main program
@@ -337,7 +339,7 @@ howToAccessLabel dflags _ os _ _ _
         --           if we don't dynamically link to Haskell code,
         --           it actually manages to do so without messing things up.
         | osElfTarget os
-        , not (gopt Opt_PIC dflags) && WayDyn `notElem` ways dflags
+        , not (positionIndependent dflags) && WayDyn `notElem` ways dflags
         = AccessDirectly
 
 howToAccessLabel dflags arch os this_mod DataReference lbl
@@ -351,7 +353,7 @@ howToAccessLabel dflags arch os this_mod DataReference lbl
             -- via a symbol pointer (see below for an explanation why
             -- PowerPC32 Linux is especially broken).
             | arch == ArchPPC
-            , gopt Opt_PIC dflags
+            , positionIndependent dflags
             -> AccessViaSymbolPtr
 
             | otherwise
@@ -372,12 +374,13 @@ howToAccessLabel dflags arch os this_mod DataReference lbl
 
 howToAccessLabel dflags arch os this_mod CallReference lbl
         | osElfTarget os
-        , labelDynamic dflags this_mod lbl && not (gopt Opt_PIC dflags)
+        , labelDynamic dflags this_mod lbl && not (positionIndependent dflags)
         = AccessDirectly
 
         | osElfTarget os
         , arch /= ArchX86
-        , labelDynamic dflags this_mod lbl && gopt Opt_PIC dflags
+        , labelDynamic dflags this_mod lbl
+        , positionIndependent dflags
         = AccessViaStub
 
 howToAccessLabel dflags _ os this_mod _ lbl
@@ -388,7 +391,7 @@ howToAccessLabel dflags _ os this_mod _ lbl
 
 -- all other platforms
 howToAccessLabel dflags _ _ _ _ _
-        | not (gopt Opt_PIC dflags)
+        | not (positionIndependent dflags)
         = AccessDirectly
 
         | otherwise
@@ -397,7 +400,7 @@ howToAccessLabel dflags _ _ _ _ _
 
 
 -- -------------------------------------------------------------------
--- | Says what we we have to add to our 'PIC base register' in order to
+-- | Says what we have to add to our 'PIC base register' in order to
 --      get the address of a label.
 
 picRelative :: Arch -> OS -> CLabel -> CmmLit
@@ -467,7 +470,7 @@ needImportedSymbols dflags arch os
         -- PowerPC Linux: -fPIC or -dynamic
         | osElfTarget os
         , arch  == ArchPPC
-        = gopt Opt_PIC dflags || WayDyn `elem` ways dflags
+        = positionIndependent dflags || WayDyn `elem` ways dflags
 
         -- PowerPC 64 Linux: always
         | osElfTarget os
@@ -477,7 +480,7 @@ needImportedSymbols dflags arch os
         -- i386 (and others?): -dynamic but not -fPIC
         | osElfTarget os
         , arch /= ArchPPC_64 ELF_V1 && arch /= ArchPPC_64 ELF_V2
-        = WayDyn `elem` ways dflags && not (gopt Opt_PIC dflags)
+        = WayDyn `elem` ways dflags && not (positionIndependent dflags)
 
         | otherwise
         = False
@@ -499,7 +502,7 @@ gotLabel
 -- However, for PIC on x86, we need a small helper function.
 pprGotDeclaration :: DynFlags -> Arch -> OS -> SDoc
 pprGotDeclaration dflags ArchX86 OSDarwin
-        | gopt Opt_PIC dflags
+        | positionIndependent dflags
         = vcat [
                 text ".section __TEXT,__textcoal_nt,coalesced,no_toc",
                 text ".weak_definition ___i686.get_pc_thunk.ax",
@@ -521,7 +524,7 @@ pprGotDeclaration _ _ OSAIX
                  ]
 
 
--- PPC 64 ELF v1needs a Table Of Contents (TOC) on Linux
+-- PPC 64 ELF v1 needs a Table Of Contents (TOC) on Linux
 pprGotDeclaration _ (ArchPPC_64 ELF_V1) OSLinux
         = text ".section \".toc\",\"aw\""
 -- In ELF v2 we also need to tell the assembler that we want ABI
@@ -540,7 +543,7 @@ pprGotDeclaration _ (ArchPPC_64 _) _
 pprGotDeclaration dflags arch os
         | osElfTarget os
         , arch /= ArchPPC_64 ELF_V1 && arch /= ArchPPC_64 ELF_V2
-        , not (gopt Opt_PIC dflags)
+        , not (positionIndependent dflags)
         = empty
 
         | osElfTarget os
@@ -565,7 +568,7 @@ pprGotDeclaration _ _ _
 pprImportedSymbol :: DynFlags -> Platform -> CLabel -> SDoc
 pprImportedSymbol dflags platform@(Platform { platformArch = ArchPPC, platformOS = OSDarwin }) importedLbl
         | Just (CodeStub, lbl) <- dynamicLinkerLabelInfo importedLbl
-        = case gopt Opt_PIC dflags of
+        = case positionIndependent dflags of
            False ->
             vcat [
                 text ".symbol_stub",
@@ -619,7 +622,7 @@ pprImportedSymbol dflags platform@(Platform { platformArch = ArchPPC, platformOS
 
 pprImportedSymbol dflags platform@(Platform { platformArch = ArchX86, platformOS = OSDarwin }) importedLbl
         | Just (CodeStub, lbl) <- dynamicLinkerLabelInfo importedLbl
-        = case gopt Opt_PIC dflags of
+        = case positionIndependent dflags of
            False ->
             vcat [
                 text ".symbol_stub",
@@ -652,7 +655,7 @@ pprImportedSymbol dflags platform@(Platform { platformArch = ArchX86, platformOS
                     text "\tjmp dyld_stub_binding_helper"
             ]
           $+$ vcat [        text ".section __DATA, __la_sym_ptr"
-                    <> (if gopt Opt_PIC dflags then int 2 else int 3)
+                    <> (if positionIndependent dflags then int 2 else int 3)
                     <> text ",lazy_symbol_pointers",
                 text "L" <> pprCLabel platform lbl <> ptext (sLit "$lazy_ptr:"),
                     text "\t.indirect_symbol" <+> pprCLabel platform lbl,
@@ -814,7 +817,8 @@ initializePicBase_ppc ArchPPC os picReg
             fetchPC (BasicBlock bID insns) =
               BasicBlock bID (PPC.FETCHPC picReg
                               : PPC.ADDIS picReg picReg (PPC.HA gotOffset)
-                              : PPC.ADDI picReg picReg (PPC.LO gotOffset)
+                              : PPC.ADD picReg picReg
+                                        (PPC.RIImm (PPC.LO gotOffset))
                               : PPC.MR PPC.r30 picReg
                               : insns)
 

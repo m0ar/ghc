@@ -1,23 +1,24 @@
-{-# LANGUAGE CPP                    #-}
-{-# LANGUAGE DataKinds              #-}
-{-# LANGUAGE DeriveFunctor          #-}
+{-# LANGUAGE CPP                        #-}
+{-# LANGUAGE DataKinds                  #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE EmptyDataDeriving          #-}
+{-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
+{-# LANGUAGE GADTs                      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DeriveGeneric          #-}
-{-# LANGUAGE FlexibleContexts       #-}
-{-# LANGUAGE FlexibleInstances      #-}
-{-# LANGUAGE GADTs                  #-}
-{-# LANGUAGE KindSignatures         #-}
-{-# LANGUAGE MagicHash              #-}
-{-# LANGUAGE NoImplicitPrelude      #-}
-{-# LANGUAGE PolyKinds              #-}
-{-# LANGUAGE ScopedTypeVariables    #-}
-{-# LANGUAGE StandaloneDeriving     #-}
-{-# LANGUAGE Trustworthy            #-}
-{-# LANGUAGE TypeFamilies           #-}
-{-# LANGUAGE TypeInType             #-}
-{-# LANGUAGE TypeOperators          #-}
-{-# LANGUAGE TypeSynonymInstances   #-}
-{-# LANGUAGE UndecidableInstances   #-}
+{-# LANGUAGE KindSignatures             #-}
+{-# LANGUAGE MagicHash                  #-}
+{-# LANGUAGE NoImplicitPrelude          #-}
+{-# LANGUAGE PolyKinds                  #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE Trustworthy                #-}
+{-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeInType                 #-}
+{-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE TypeSynonymInstances       #-}
+{-# LANGUAGE UndecidableInstances       #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -256,9 +257,9 @@ module GHC.Generics  (
 -- all the constructors and fields as needed. However, users /should not rely on
 -- a specific nesting strategy/ for ':+:' and ':*:' being used. The compiler is
 -- free to choose any nesting it prefers. (In practice, the current implementation
--- tries to produce a more or less balanced nesting, so that the traversal of the
--- structure of the datatype from the root to a particular component can be performed
--- in logarithmic rather than linear time.)
+-- tries to produce a more-or-less balanced nesting, so that the traversal of
+-- the structure of the datatype from the root to a particular component can be
+-- performed in logarithmic rather than linear time.)
 
 -- ** Defining datatype-generic functions
 --
@@ -350,6 +351,14 @@ module GHC.Generics  (
 --   encode' ('L1' x) = False : encode' x
 --   encode' ('R1' x) = True  : encode' x
 -- @
+--
+-- (Note that this encoding strategy may not be reliable across different
+-- versions of GHC. Recall that the compiler is free to choose any nesting
+-- of ':+:' it chooses, so if GHC chooses @(a ':+:' b) ':+:' c@, then the
+-- encoding for @a@ would be @[False, False]@, @b@ would be @[False, True]@,
+-- and @c@ would be @[True]@. However, if GHC chooses @a ':+:' (b ':+:' c)@,
+-- then the encoding for @a@ would be @[False]@, @b@ would be @[True, False]@,
+-- and @c@ would be @[True, True]@.)
 --
 -- In the case for ':*:', we append the encodings of the two subcomponents:
 --
@@ -731,10 +740,10 @@ import GHC.Types
 -- Needed for instances
 import GHC.Arr     ( Ix )
 import GHC.Base    ( Alternative(..), Applicative(..), Functor(..)
-                   , Monad(..), MonadPlus(..), String, coerce )
+                   , Monad(..), MonadPlus(..), NonEmpty(..), String, coerce )
 import GHC.Classes ( Eq(..), Ord(..) )
 import GHC.Enum    ( Bounded, Enum )
-import GHC.Read    ( Read(..), lex, readParen )
+import GHC.Read    ( Read(..) )
 import GHC.Show    ( Show(..), showString )
 
 -- Needed for metadata
@@ -747,12 +756,14 @@ import GHC.TypeLits ( Nat, Symbol, KnownSymbol, KnownNat, symbolVal, natVal )
 
 -- | Void: used for datatypes without constructors
 data V1 (p :: k)
-  deriving (Functor, Generic, Generic1)
-
-deriving instance Eq   (V1 p)
-deriving instance Ord  (V1 p)
-deriving instance Read (V1 p)
-deriving instance Show (V1 p)
+  deriving ( Eq       -- ^ @since 4.9.0.0
+           , Ord      -- ^ @since 4.9.0.0
+           , Read     -- ^ @since 4.9.0.0
+           , Show     -- ^ @since 4.9.0.0
+           , Functor  -- ^ @since 4.9.0.0
+           , Generic  -- ^ @since 4.9.0.0
+           , Generic1 -- ^ @since 4.9.0.0
+           )
 
 -- | Unit: used for constructors without arguments
 data U1 (p :: k) = U1
@@ -767,8 +778,7 @@ instance Ord (U1 p) where
   compare _ _ = EQ
 
 -- | @since 4.9.0.0
-instance Read (U1 p) where
-  readsPrec d = readParen (d > 10) (\r -> [(U1, s) | ("U1",s) <- lex r ])
+deriving instance Read (U1 p)
 
 -- | @since 4.9.0.0
 instance Show (U1 p) where
@@ -1140,8 +1150,15 @@ instance (SingI mn, SingI su, SingI ss, SingI ds)
   selSourceStrictness   _ = fromSing (sing :: Sing ss)
   selDecidedStrictness  _ = fromSing (sing :: Sing ds)
 
--- | Representable types of kind *.
--- This class is derivable in GHC with the DeriveGeneric flag on.
+-- | Representable types of kind @*@.
+-- This class is derivable in GHC with the @DeriveGeneric@ flag on.
+--
+-- A 'Generic' instance must satisfy the following laws:
+--
+-- @
+-- 'from' . 'to' ≡ 'id'
+-- 'to' . 'from' ≡ 'id'
+-- @
 class Generic a where
   -- | Generic representation type
   type Rep a :: * -> *
@@ -1154,6 +1171,13 @@ class Generic a where
 -- | Representable types of kind @* -> *@ (or kind @k -> *@, when @PolyKinds@
 -- is enabled).
 -- This class is derivable in GHC with the @DeriveGeneric@ flag on.
+--
+-- A 'Generic1' instance must satisfy the following laws:
+--
+-- @
+-- 'from1' . 'to1' ≡ 'id'
+-- 'to1' . 'from1' ≡ 'id'
+-- @
 class Generic1 (f :: k -> *) where
   -- | Generic representation type
   type Rep1 f :: k -> *
@@ -1192,6 +1216,7 @@ data Meta = MetaData Symbol Symbol Symbol Bool
 --------------------------------------------------------------------------------
 
 deriving instance Generic [a]
+deriving instance Generic (NonEmpty a)
 deriving instance Generic (Maybe a)
 deriving instance Generic (Either a b)
 deriving instance Generic Bool
@@ -1206,6 +1231,7 @@ deriving instance Generic ((,,,,,) a b c d e f)
 deriving instance Generic ((,,,,,,) a b c d e f g)
 
 deriving instance Generic1 []
+deriving instance Generic1 NonEmpty
 deriving instance Generic1 Maybe
 deriving instance Generic1 (Either a)
 deriving instance Generic1 Proxy

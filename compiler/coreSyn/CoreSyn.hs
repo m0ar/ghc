@@ -77,7 +77,7 @@ module CoreSyn (
         collectAnnArgs, collectAnnArgsTicks,
 
         -- ** Operations on annotations
-        deAnnotate, deAnnotate', deAnnAlt,
+        deAnnotate, deAnnotate', deAnnAlt, deAnnBind,
         collectAnnBndrs, collectNAnnBndrs,
 
         -- * Orphanhood
@@ -98,6 +98,8 @@ module CoreSyn (
     ) where
 
 #include "HsVersions.h"
+
+import GhcPrelude
 
 import CostCentre
 import VarEnv( InScopeSet )
@@ -137,7 +139,7 @@ These data types are the heart of the compiler
 -}
 
 -- | This is the data type that represents GHCs core intermediate language. Currently
--- GHC uses System FC <http://research.microsoft.com/~simonpj/papers/ext-f/> for this purpose,
+-- GHC uses System FC <https://www.microsoft.com/en-us/research/publication/system-f-with-type-equality-coercions/> for this purpose,
 -- which is closely related to the simpler and better known System F <http://en.wikipedia.org/wiki/System_F>.
 --
 -- We get from Haskell source to this Core language in a number of stages:
@@ -311,16 +313,17 @@ data AltCon
 -- This instance is a bit shady. It can only be used to compare AltCons for
 -- a single type constructor. Fortunately, it seems quite unlikely that we'll
 -- ever need to compare AltCons for different type constructors.
+-- The instance adheres to the order described in [CoreSyn case invariants]
 instance Ord AltCon where
   compare (DataAlt con1) (DataAlt con2) =
     ASSERT( dataConTyCon con1 == dataConTyCon con2 )
     compare (dataConTag con1) (dataConTag con2)
-  compare (DataAlt _) _ = LT
-  compare _ (DataAlt _) = GT
+  compare (DataAlt _) _ = GT
+  compare _ (DataAlt _) = LT
   compare (LitAlt l1) (LitAlt l2) = compare l1 l2
-  compare (LitAlt _) DEFAULT = LT
+  compare (LitAlt _) DEFAULT = GT
   compare DEFAULT DEFAULT = EQ
-  compare DEFAULT _ = GT
+  compare DEFAULT _ = LT
 
 -- | Binding, used for top level bindings in a module and local bindings in a @let@.
 
@@ -344,7 +347,7 @@ In particular, scrutinee variables `x` in expressions of the form
 "wild_". These "wild" variables may appear in the body of the
 case-expression, and further, may be shadowed within the body.
 
-So the Unique in an Var is not really unique at all.  Still, it's very
+So the Unique in a Var is not really unique at all.  Still, it's very
 useful to give a constant-time equality/ordering for Vars, and to give
 a key that can be used to make sets of Vars (VarSet), or mappings from
 Vars to other things (VarEnv).   Moreover, if you do want to eliminate
@@ -457,7 +460,8 @@ See #case_invariants#
 
 Note [Levity polymorphism invariants]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-The levity-polymorphism invariants are these:
+The levity-polymorphism invariants are these (as per "Levity Polymorphism",
+PLDI '17):
 
 * The type of a term-binder must not be levity-polymorphic,
   unless it is a let(rec)-bound join point
@@ -702,33 +706,64 @@ polymorphic in its return type. That is, if its type is
   forall a1 ... ak. t1 -> ... -> tn -> r
 
 where its join arity is k+n, none of the type parameters ai may occur free in r.
-The most direct explanation is that given
 
-  join j @a1 ... @ak x1 ... xn = e1 in e2
+In some way, this falls out of the fact that given
 
-our typing rules require `e1` and `e2` to have the same type. Therefore the type
-of `e1`---the return type of the join point---must be the same as the type of
-e2. Since the type variables aren't bound in `e2`, its type can't include them,
-and thus neither can the type of `e1`.
+  join
+     j @a1 ... @ak x1 ... xn = e1
+  in e2
 
-There's a deeper explanation in terms of the sequent calculus in Section 5.3 of
-a previous paper:
+then all calls to `j` are in tail-call positions of `e`, and expressions in
+tail-call positions in `e` have the same type as `e`.
+Therefore the type of `e1` -- the return type of the join point -- must be the
+same as the type of e2.
+Since the type variables aren't bound in `e2`, its type can't include them, and
+thus neither can the type of `e1`.
 
-  Paul Downen, Luke Maurer, Zena Ariola, and Simon Peyton Jones. "Sequent
-  calculus as a compiler intermediate language." ICFP'16.
+This unfortunately prevents the `go` in the following code from being a
+join-point:
 
-  https://www.microsoft.com/en-us/research/wp-content/uploads/2016/04/sequent-calculus-icfp16.pdf
+  iter :: forall a. Int -> (a -> a) -> a -> a
+  iter @a n f x = go @a n f x
+    where
+      go :: forall a. Int -> (a -> a) -> a -> a
+      go @a 0 _ x = x
+      go @a n f x = go @a (n-1) f (f x)
 
-The quick version: Consider the CPS term (the paper uses the sequent calculus,
-but we can translate readily):
+In this case, a static argument transformation would fix that (see
+ticket #14620):
 
-  \k -> join j @a1 ... @ak x1 ... xn = e1 k in e2 k
+  iter :: forall a. Int -> (a -> a) -> a -> a
+  iter @a n f x = go' @a n f x
+    where
+      go' :: Int -> (a -> a) -> a -> a
+      go' 0 _ x = x
+      go' n f x = go' (n-1) f (f x)
 
-Since `j` is a join point, it doesn't bind a continuation variable but reuses
-the variable `k` from the context. But the parameters `ai` are not in `k`'s
-scope, and `k`'s type determines the return type of `j`; thus the `ai`s don't
-appear in the return type of `j`. (Also, since `e1` and `e2` are passed the same
-continuation, they must have the same type; hence the direct explanation above.)
+In general, loopification could be employed to do that (see #14068.)
+
+Can we simply drop the requirement, and allow `go` to be a join-point? We
+could, and it would work. But we could not longer apply the case-of-join-point
+transformation universally. This transformation would do:
+
+  case (join go @a n f x = case n of 0 -> x
+                                     n -> go @a (n-1) f (f x)
+        in go @Bool n neg True) of
+    True -> e1; False -> e2
+
+ ===>
+
+  join go @a n f x = case n of 0 -> case x of True -> e1; False -> e2
+                          n -> go @a (n-1) f (f x)
+  in go @Bool n neg True
+
+but that is ill-typed, as `x` is type `a`, not `Bool`.
+
+
+This is also justifies why we do not consider the `e` in `e |> co` to be in
+tail position: A cast changes the type, but the type must be the same. But
+operationally, casts are vacuous, so this is a bit unfortunate! See #14610 for
+ideas how to fix this.
 
 ************************************************************************
 *                                                                      *
@@ -855,7 +890,7 @@ data TickishScoping =
 
     -- | Soft scoping: We want all code that is covered to stay
     -- covered.  Note that this scope type does not forbid
-    -- transformations from happening, as as long as all results of
+    -- transformations from happening, as long as all results of
     -- the transformations are still covered by this tick or a copy of
     -- it. For example
     --
@@ -1651,7 +1686,7 @@ In unfoldings and rules, we guarantee that the template is occ-analysed,
 so that the occurrence info on the binders is correct.  This is important,
 because the Simplifier does not re-analyse the template when using it. If
 the occurrence info is wrong
-  - We may get more simpifier iterations than necessary, because
+  - We may get more simplifier iterations than necessary, because
     once-occ info isn't there
   - More seriously, we may get an infinite loop if there's a Rec
     without a loop breaker marked
@@ -1682,6 +1717,8 @@ ltAlt a1 a2 = (a1 `cmpAlt` a2) == LT
 
 cmpAltCon :: AltCon -> AltCon -> Ordering
 -- ^ Compares 'AltCon's within a single list of alternatives
+-- DEFAULT comes out smallest, so that sorting by AltCon
+-- puts alternatives in the order required by #case_invariants#
 cmpAltCon DEFAULT      DEFAULT     = EQ
 cmpAltCon DEFAULT      _           = LT
 
@@ -2018,7 +2055,7 @@ collectNBinders orig_n orig_expr
     go n bs (Lam b e) = go (n-1) (b:bs) e
     go _ _  _         = pprPanic "collectNBinders" $ int orig_n
 
--- | Takes a nested application expression and returns the the function
+-- | Takes a nested application expression and returns the function
 -- being applied and the arguments to which it is applied
 collectArgs :: Expr b -> (Expr b, [Arg b])
 collectArgs expr
@@ -2121,7 +2158,7 @@ data AnnBind bndr annot
   = AnnNonRec bndr (AnnExpr bndr annot)
   | AnnRec    [(bndr, AnnExpr bndr annot)]
 
--- | Takes a nested application expression and returns the the function
+-- | Takes a nested application expression and returns the function
 -- being applied and the arguments to which it is applied
 collectAnnArgs :: AnnExpr b a -> (AnnExpr b a, [AnnExpr b a])
 collectAnnArgs expr
@@ -2155,15 +2192,15 @@ deAnnotate' (AnnTick tick body)   = Tick tick (deAnnotate body)
 
 deAnnotate' (AnnLet bind body)
   = Let (deAnnBind bind) (deAnnotate body)
-  where
-    deAnnBind (AnnNonRec var rhs) = NonRec var (deAnnotate rhs)
-    deAnnBind (AnnRec pairs) = Rec [(v,deAnnotate rhs) | (v,rhs) <- pairs]
-
 deAnnotate' (AnnCase scrut v t alts)
   = Case (deAnnotate scrut) v t (map deAnnAlt alts)
 
 deAnnAlt :: AnnAlt bndr annot -> Alt bndr
 deAnnAlt (con,args,rhs) = (con,args,deAnnotate rhs)
+
+deAnnBind  :: AnnBind b annot -> Bind b
+deAnnBind (AnnNonRec var rhs) = NonRec var (deAnnotate rhs)
+deAnnBind (AnnRec pairs) = Rec [(v,deAnnotate rhs) | (v,rhs) <- pairs]
 
 -- | As 'collectBinders' but for 'AnnExpr' rather than 'Expr'
 collectAnnBndrs :: AnnExpr bndr annot -> ([bndr], AnnExpr bndr annot)

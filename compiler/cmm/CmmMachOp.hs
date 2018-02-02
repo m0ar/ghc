@@ -30,6 +30,8 @@ where
 
 #include "HsVersions.h"
 
+import GhcPrelude
+
 import CmmType
 import Outputable
 import DynFlags
@@ -136,9 +138,12 @@ data MachOp
   -- Floating point vector operations
   | MO_VF_Add  Length Width
   | MO_VF_Sub  Length Width
-  | MO_VF_Neg  Length Width             -- unary -
+  | MO_VF_Neg  Length Width      -- unary negation
   | MO_VF_Mul  Length Width
   | MO_VF_Quot Length Width
+
+  -- Alignment check (for -falignment-sanitisation)
+  | MO_AlignmentCheck Int Width
   deriving (Eq, Show)
 
 pprMachOp :: MachOp -> SDoc
@@ -417,6 +422,8 @@ machOpResultType dflags mop tys =
     MO_VF_Mul  l w      -> cmmVec l (cmmFloat w)
     MO_VF_Quot l w      -> cmmVec l (cmmFloat w)
     MO_VF_Neg  l w      -> cmmVec l (cmmFloat w)
+
+    MO_AlignmentCheck _ _ -> ty1
   where
     (ty1:_) = tys
 
@@ -507,6 +514,8 @@ machOpArgReps dflags op =
     MO_VF_Quot _ r      -> [r,r]
     MO_VF_Neg  _ r      -> [r]
 
+    MO_AlignmentCheck _ r -> [r]
+
 -----------------------------------------------------------------------------
 -- CallishMachOp
 -----------------------------------------------------------------------------
@@ -575,8 +584,11 @@ data CallishMachOp
   | MO_Memcpy Int
   | MO_Memset Int
   | MO_Memmove Int
+  | MO_Memcmp Int
 
   | MO_PopCnt Width
+  | MO_Pdep Width
+  | MO_Pext Width
   | MO_Clz Width
   | MO_Ctz Width
 
@@ -607,6 +619,7 @@ callishMachOpHints op = case op of
   MO_Memcpy _  -> ([], [AddrHint,AddrHint,NoHint])
   MO_Memset _  -> ([], [AddrHint,NoHint,NoHint])
   MO_Memmove _ -> ([], [AddrHint,AddrHint,NoHint])
+  MO_Memcmp _  -> ([], [AddrHint, AddrHint, NoHint])
   _            -> ([],[])
   -- empty lists indicate NoHint
 
@@ -616,4 +629,5 @@ machOpMemcpyishAlign op = case op of
   MO_Memcpy  align -> Just align
   MO_Memset  align -> Just align
   MO_Memmove align -> Just align
+  MO_Memcmp  align -> Just align
   _                -> Nothing

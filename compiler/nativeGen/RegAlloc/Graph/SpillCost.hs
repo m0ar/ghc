@@ -13,6 +13,8 @@ module RegAlloc.Graph.SpillCost (
 
         lifeMapFromSpillCostInfo
 ) where
+import GhcPrelude
+
 import RegAlloc.Liveness
 import Instruction
 import RegClass
@@ -20,7 +22,7 @@ import Reg
 
 import GraphBase
 
-import Hoopl (mapLookup)
+import Hoopl.Collections (mapLookup)
 import Cmm
 import UniqFM
 import UniqSet

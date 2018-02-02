@@ -24,6 +24,8 @@ module StgCmmHeap (
 
 #include "HsVersions.h"
 
+import GhcPrelude hiding ((<*>))
+
 import StgSyn
 import CLabel
 import StgCmmLayout
@@ -36,7 +38,7 @@ import StgCmmEnv
 
 import MkGraph
 
-import Hoopl
+import Hoopl.Label
 import SMRep
 import BlockId
 import Cmm
@@ -48,8 +50,6 @@ import Module
 import DynFlags
 import FastString( mkFastString, fsLit )
 import Panic( sorry )
-
-import Prelude hiding ((<*>))
 
 import Control.Monad (when)
 import Data.Maybe (isJust)
@@ -149,7 +149,7 @@ emitSetDynHdr base info_ptr ccs
   where
     header :: DynFlags -> [CmmExpr]
     header dflags = [info_ptr] ++ dynProfHdr dflags ccs
-        -- ToDof: Parallel stuff
+        -- ToDo: Parallel stuff
         -- No ticky header
 
 -- Store the item (expr,off) in base[off]
@@ -221,23 +221,10 @@ mkStaticClosure :: DynFlags -> CLabel -> CostCentreStack -> [CmmLit]
 mkStaticClosure dflags info_lbl ccs payload padding static_link_field saved_info_field
   =  [CmmLabel info_lbl]
   ++ staticProfHdr dflags ccs
-  ++ concatMap (padLitToWord dflags) payload
+  ++ payload
   ++ padding
   ++ static_link_field
   ++ saved_info_field
-
--- JD: Simon had ellided this padding, but without it the C back end asserts
--- failure. Maybe it's a bad assertion, and this padding is indeed unnecessary?
-padLitToWord :: DynFlags -> CmmLit -> [CmmLit]
-padLitToWord dflags lit = lit : padding pad_length
-  where width = typeWidth (cmmLitType dflags lit)
-        pad_length = wORD_SIZE dflags - widthInBytes width :: Int
-
-        padding n | n <= 0 = []
-                  | n `rem` 2 /= 0 = CmmInt 0 W8  : padding (n-1)
-                  | n `rem` 4 /= 0 = CmmInt 0 W16 : padding (n-2)
-                  | n `rem` 8 /= 0 = CmmInt 0 W32 : padding (n-4)
-                  | otherwise      = CmmInt 0 W64 : padding (n-8)
 
 -----------------------------------------------------------
 --              Heap overflow checking

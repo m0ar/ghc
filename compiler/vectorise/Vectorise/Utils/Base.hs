@@ -4,7 +4,7 @@ module Vectorise.Utils.Base
   ( voidType
   , newLocalVVar
 
-  , mkDataConTag, dataConTagZ
+  , mkDataConTag
   , mkWrapType
   , mkClosureTypes
   , mkPReprType
@@ -26,6 +26,8 @@ module Vectorise.Utils.Base
 
   , preprFamInst
 ) where
+
+import GhcPrelude
 
 import Vectorise.Monad
 import Vectorise.Vect
@@ -65,9 +67,6 @@ newLocalVVar fs vty
 
 mkDataConTag :: DynFlags -> DataCon -> CoreExpr
 mkDataConTag dflags = mkIntLitInt dflags . dataConTagZ
-
-dataConTagZ :: DataCon -> Int
-dataConTagZ con = dataConTag con - fIRST_TAG
 
 
 -- Type Construction ----------------------------------------------------------

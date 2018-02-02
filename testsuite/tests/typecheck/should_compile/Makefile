@@ -2,6 +2,10 @@ TOP=../../..
 include $(TOP)/mk/boilerplate.mk
 include $(TOP)/mk/test.mk
 
+T14434:
+	'$(TEST_HC)' $(TEST_HC_OPTS) -c T14434.hs -ddump-simpl | grep toStringX
+         # Expecting toStringX = toString, not discarding argument
+
 tc170:
 	$(RM) Tc170_Aux.hi Tc170_Aux.o tc170.hi tc170.o
 	'$(TEST_HC)' $(TEST_HC_OPTS) -c Tc170_Aux.hs
@@ -56,3 +60,9 @@ Tc271:
 	'$(TEST_HC)' $(TEST_HC_OPTS) -c Tc271.hs-boot
 	'$(TEST_HC)' $(TEST_HC_OPTS) -c Tc271a.hs
 	'$(TEST_HC)' $(TEST_HC_OPTS) -c Tc271.hs
+
+T13585:
+	$(RM) -f T13585a.o T13585a.hi T13585b.o T13585b.hi T13585.o T13585.hi
+	'$(TEST_HC)' $(TEST_HC_OPTS) -c T13585a.hs -O
+	'$(TEST_HC)' $(TEST_HC_OPTS) -c T13585b.hs -O
+	'$(TEST_HC)' $(TEST_HC_OPTS) -c T13585.hs  -O

@@ -28,6 +28,8 @@ module Rules (
 
 #include "HsVersions.h"
 
+import GhcPrelude
+
 import CoreSyn          -- All of it
 import Module           ( Module, ModuleSet, elemModuleSet )
 import CoreSubst
@@ -411,21 +413,20 @@ lookupRule dflags in_scope is_active fn args rules
 findBest :: (Id, [CoreExpr])
          -> (CoreRule,CoreExpr) -> [(CoreRule,CoreExpr)] -> (CoreRule,CoreExpr)
 -- All these pairs matched the expression
--- Return the pair the the most specific rule
+-- Return the pair the most specific rule
 -- The (fn,args) is just for overlap reporting
 
 findBest _      (rule,ans)   [] = (rule,ans)
 findBest target (rule1,ans1) ((rule2,ans2):prs)
   | rule1 `isMoreSpecific` rule2 = findBest target (rule1,ans1) prs
   | rule2 `isMoreSpecific` rule1 = findBest target (rule2,ans2) prs
-  | debugIsOn = let pp_rule rule = sdocWithPprDebug $ \dbg -> if dbg
-                        then ppr rule
-                        else doubleQuotes (ftext (ruleName rule))
+  | debugIsOn = let pp_rule rule
+                      = ifPprDebug (ppr rule)
+                                   (doubleQuotes (ftext (ruleName rule)))
                 in pprTrace "Rules.findBest: rule overlap (Rule 1 wins)"
-                         (vcat [ sdocWithPprDebug $ \dbg -> if dbg
-                                   then text "Expression to match:" <+> ppr fn
-                                        <+> sep (map ppr args)
-                                   else empty
+                         (vcat [ whenPprDebug $
+                                 text "Expression to match:" <+> ppr fn
+                                 <+> sep (map ppr args)
                                , text "Rule 1:" <+> pp_rule rule1
                                , text "Rule 2:" <+> pp_rule rule2]) $
                 findBest target (rule1,ans1) prs
@@ -582,7 +583,7 @@ matchN (in_scope, id_unf) rule_name tmpl_vars tmpl_es target_es
             = env
 
     unbound var = pprPanic "Template variable unbound in rewrite rule" $
-                  vcat [ text "Variable:" <+> ppr var
+                  vcat [ text "Variable:" <+> ppr var <+> dcolon <+> ppr (varType var)
                        , text "Rule" <+> pprRuleName rule_name
                        , text "Rule bndrs:" <+> ppr tmpl_vars
                        , text "LHS args:" <+> ppr tmpl_es
@@ -617,7 +618,7 @@ bound on the LHS:
     RULE forall (c :: a~b). f (x |> c) = e
   Now, if that binding is inlined, so that a=b=Int, we'd get
     RULE forall (c :: Int~Int). f (x |> c) = e
-  and now when we simpilfy the LHS (Simplify.simplRule) we
+  and now when we simplify the LHS (Simplify.simplRule) we
   optCoercion will turn that 'c' into Refl:
     RULE forall (c :: Int~Int). f (x |> <Int>) = e
   and then perhaps drop it altogether.  Now 'c' is unbound.
@@ -843,7 +844,7 @@ match_co renv subst co1 co2
       _ -> Nothing
 match_co _ _ _co1 _co2
     -- Currently just deals with CoVarCo, TyConAppCo and Refl
-#ifdef DEBUG
+#if defined(DEBUG)
   = pprTrace "match_co: needs more cases" (ppr _co1 $$ ppr _co2) Nothing
 #else
   = Nothing

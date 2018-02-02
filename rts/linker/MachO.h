@@ -1,5 +1,4 @@
-#ifndef LINKER_MACHO_H
-#define LINKER_MACHO_H
+#pragma once
 
 #include "Rts.h"
 
@@ -16,10 +15,8 @@ int ocRunInit_MachO        ( ObjectCode* oc );
 int machoGetMisalignment( FILE * );
 int ocAllocateSymbolExtras_MachO ( ObjectCode* oc );
 
-#ifdef powerpc_HOST_ARCH
+#if defined(powerpc_HOST_ARCH)
 void machoInitSymbolsWithoutUnderscore( void );
 #endif
 
 #include "EndPrivate.h"
-
-#endif /* LINKER_MACHO_H */

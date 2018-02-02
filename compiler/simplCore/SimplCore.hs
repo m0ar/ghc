@@ -10,6 +10,8 @@ module SimplCore ( core2core, simplifyExpr ) where
 
 #include "HsVersions.h"
 
+import GhcPrelude
+
 import DynFlags
 import CoreSyn
 import HscTypes
@@ -24,7 +26,7 @@ import CoreUtils        ( mkTicks, stripTicksTop )
 import CoreLint         ( endPass, lintPassResult, dumpPassResult,
                           lintAnnots )
 import Simplify         ( simplTopBinds, simplExpr, simplRules )
-import SimplUtils       ( simplEnvForGHCi, activeRule )
+import SimplUtils       ( simplEnvForGHCi, activeRule, activeUnfolding )
 import SimplEnv
 import SimplMonad
 import CoreMonad
@@ -43,6 +45,7 @@ import Specialise       ( specProgram)
 import SpecConstr       ( specConstrProgram)
 import DmdAnal          ( dmdAnalProgram )
 import CallArity        ( callArityAnalProgram )
+import Exitify          ( exitifyProgram )
 import WorkWrap         ( wwTopBinds )
 import Vectorise        ( vectorise )
 import SrcLoc
@@ -56,7 +59,7 @@ import Outputable
 import Control.Monad
 import qualified GHC.LanguageExtensions as LangExt
 
-#ifdef GHCI
+#if defined(GHCI)
 import DynamicLoading   ( loadPlugins )
 import Plugins          ( installCoreToDos )
 #else
@@ -120,6 +123,7 @@ getCoreToDo dflags
     max_iter      = maxSimplIterations dflags
     rule_check    = ruleCheck          dflags
     call_arity    = gopt Opt_CallArity                    dflags
+    exitification = gopt Opt_Exitification                dflags
     strictness    = gopt Opt_Strictness                   dflags
     full_laziness = gopt Opt_FullLaziness                 dflags
     do_specialise = gopt Opt_Specialise                   dflags
@@ -142,6 +146,7 @@ getCoreToDo dflags
 
     base_mode = SimplMode { sm_phase      = panic "base_mode"
                           , sm_names      = []
+                          , sm_dflags     = dflags
                           , sm_rules      = rules_on
                           , sm_eta_expand = eta_expand_on
                           , sm_inline     = True
@@ -284,7 +289,7 @@ getCoreToDo dflags
 
                 -- At least 3 iterations because otherwise we land up with
                 -- huge dead expressions because of an infelicity in the
-                -- simpifier.
+                -- simplifier.
                 --      let k = BIG in foldr k z xs
                 -- ==>  let k = BIG in letrec go = \xs -> ...(k x).... in go xs
                 -- ==>  let k = BIG in letrec go = \xs -> ...(BIG x).... in go xs
@@ -304,6 +309,9 @@ getCoreToDo dflags
             ],
 
         runWhen strictness demand_analyser,
+
+        runWhen exitification CoreDoExitify,
+            -- See note [Placement of the exitification pass]
 
         runWhen full_laziness $
            CoreDoFloatOutwards FloatOutSwitches {
@@ -368,7 +376,7 @@ getCoreToDo dflags
 -- Loading plugins
 
 addPluginPasses :: [CoreToDo] -> CoreM [CoreToDo]
-#ifndef GHCI
+#if !defined(GHCI)
 addPluginPasses builtin_passes
   = do { dflags <- getDynFlags
        ; let pluginMods = pluginModNames dflags
@@ -473,6 +481,9 @@ doCorePass CoreDoStaticArgs          = {-# SCC "StaticArgs" #-}
 doCorePass CoreDoCallArity           = {-# SCC "CallArity" #-}
                                        doPassD callArityAnalProgram
 
+doCorePass CoreDoExitify             = {-# SCC "Exitify" #-}
+                                       doPass exitifyProgram
+
 doCorePass CoreDoStrictness          = {-# SCC "NewStranal" #-}
                                        doPassDFM dmdAnalProgram
 
@@ -493,7 +504,7 @@ doCorePass (CoreDoRuleCheck phase pat)  = ruleCheckPass phase pat
 doCorePass CoreDoNothing                = return
 doCorePass (CoreDoPasses passes)        = runCorePasses passes
 
-#ifdef GHCI
+#if defined(GHCI)
 doCorePass (CoreDoPluginPass _ pass) = {-# SCC "Plugin" #-} pass
 #endif
 
@@ -619,7 +630,7 @@ simplExprGently :: SimplEnv -> CoreExpr -> SimplM CoreExpr
 --      (b) the LHS and RHS of a RULE
 --      (c) Template Haskell splices
 --
--- The name 'Gently' suggests that the SimplifierMode is SimplGently,
+-- The name 'Gently' suggests that the SimplMode is SimplGently,
 -- and in fact that is so.... but the 'Gently' in simplExprGently doesn't
 -- enforce that; it just simplifies the expression twice
 
@@ -679,7 +690,8 @@ simplifyPgmIO pass@(CoreDoSimplify max_iterations mode)
     dflags       = hsc_dflags hsc_env
     print_unqual = mkPrintUnqualified dflags rdr_env
     simpl_env    = mkSimplEnv mode
-    active_rule  = activeRule simpl_env
+    active_rule  = activeRule mode
+    active_unf   = activeUnfolding mode
 
     do_iteration :: UniqSupply
                  -> Int          -- Counts iterations
@@ -733,7 +745,7 @@ simplifyPgmIO pass@(CoreDoSimplify max_iterations mode)
                        InitialPhase -> (mg_vect_decls guts, vectVars)
                        _            -> ([], vectVars)
                ; tagged_binds = {-# SCC "OccAnal" #-}
-                     occurAnalysePgm this_mod active_rule rules
+                     occurAnalysePgm this_mod active_unf active_rule rules
                                      maybeVects maybeVectVars binds
                } ;
            Err.dumpIfSet_dyn dflags Opt_D_dump_occur_anal "Occurrence analysis"
@@ -754,8 +766,8 @@ simplifyPgmIO pass@(CoreDoSimplify max_iterations mode)
                 -- Simplify the program
            ((binds1, rules1), counts1) <-
              initSmpl dflags (mkRuleEnv rule_base2 vis_orphs) fam_envs us1 sz $
-               do { env1 <- {-# SCC "SimplTopBinds" #-}
-                            simplTopBinds simpl_env tagged_binds
+               do { (floats, env1) <- {-# SCC "SimplTopBinds" #-}
+                                      simplTopBinds simpl_env tagged_binds
 
                       -- Apply the substitution to rules defined in this module
                       -- for imported Ids.  Eg  RULE map my_f = blah
@@ -763,7 +775,7 @@ simplifyPgmIO pass@(CoreDoSimplify max_iterations mode)
                       -- apply it to the rule to, or it'll never match
                   ; rules1 <- simplRules env1 Nothing rules
 
-                  ; return (getFloatBinds env1, rules1) } ;
+                  ; return (getTopFloatBinds floats, rules1) } ;
 
                 -- Stop if nothing happened; don't dump output
            if isZeroSimplCount counts1 then

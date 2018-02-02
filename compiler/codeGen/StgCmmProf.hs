@@ -27,6 +27,8 @@ module StgCmmProf (
 
 #include "HsVersions.h"
 
+import GhcPrelude
+
 import StgCmmClosure
 import StgCmmUtils
 import StgCmmMonad
@@ -207,7 +209,7 @@ ifProfilingL dflags xs
 
 initCostCentres :: CollectedCCs -> FCode ()
 -- Emit the declarations
-initCostCentres (local_CCs, ___extern_CCs, singleton_CCSs)
+initCostCentres (local_CCs, singleton_CCSs)
   = do dflags <- getDynFlags
        when (gopt Opt_SccProfilingOn dflags) $
            do mapM_ emitCostCentreDecl local_CCs

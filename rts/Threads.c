@@ -112,7 +112,7 @@ createThread(Capability *cap, W_ size)
 
     tso->trec = NO_TREC;
 
-#ifdef PROFILING
+#if defined(PROFILING)
     tso->prof.cccs = CCS_MAIN;
 #endif
 
@@ -263,7 +263,7 @@ tryWakeupThread (Capability *cap, StgTSO *tso)
 {
     traceEventThreadWakeup (cap, tso, tso->cap->no);
 
-#ifdef THREADED_RTS
+#if defined(THREADED_RTS)
     if (tso->cap != cap)
     {
         MessageWakeup *msg;
@@ -446,7 +446,7 @@ updateThunk (Capability *cap, StgTSO *tso, StgClosure *thunk, StgClosure *val)
         return;
     }
 
-    v = ((StgInd*)thunk)->indirectee;
+    v = UNTAG_CLOSURE(((StgInd*)thunk)->indirectee);
 
     updateWithIndirection(cap, thunk, val);
 
@@ -640,8 +640,8 @@ threadStackOverflow (Capability *cap, StgTSO *tso)
             // if including this frame would exceed the size of the
             // new stack (taking into account the underflow frame),
             // then stop at the previous frame.
-            if (sp + size > old_stack->stack + (new_stack->stack_size -
-                                                sizeofW(StgUnderflowFrame))) {
+            if (sp + size > old_stack->sp + (new_stack->stack_size -
+                                             sizeofW(StgUnderflowFrame))) {
                 break;
             }
             sp += size;
@@ -808,7 +808,7 @@ loop:
 
     tryWakeupThread(cap, tso);
 
-    // If it was an readMVar, then we can still do work,
+    // If it was a readMVar, then we can still do work,
     // so loop back. (XXX: This could take a while)
     if (why_blocked == BlockedOnMVarRead) {
         q = ((StgMVarTSOQueue*)q)->link;
@@ -826,7 +826,7 @@ loop:
  * Debugging: why is a thread blocked
  * ------------------------------------------------------------------------- */
 
-#if DEBUG
+#if defined(DEBUG)
 void
 printThreadBlockage(StgTSO *tso)
 {

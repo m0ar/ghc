@@ -7,6 +7,8 @@ module CallArity
     , callArityRHS -- for testing
     ) where
 
+import GhcPrelude
+
 import VarSet
 import VarEnv
 import DynFlags ( DynFlags )
@@ -18,6 +20,7 @@ import CoreArity ( typeArity )
 import CoreUtils ( exprIsCheap, exprIsTrivial )
 import UnVarGraph
 import Demand
+import Util
 
 import Control.Arrow ( first, second )
 
@@ -339,7 +342,7 @@ For a mutually recursive let, we begin by
  3. We combine the analysis result from the body and the memoized results for
     the arguments (if already present).
  4. For each variable, we find out the incoming arity and whether it is called
-    once, based on the the current analysis result. If this differs from the
+    once, based on the current analysis result. If this differs from the
     memoized results, we re-analyse the rhs and update the memoized table.
  5. If nothing had to be reanalyzed, we are done.
     Otherwise, repeat from step 3.
@@ -349,7 +352,7 @@ Note [Thunks in recursive groups]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 We never eta-expand a thunk in a recursive group, on the grounds that if it is
-part of a recursive group, then it will be called multipe times.
+part of a recursive group, then it will be called multiple times.
 
 This is not necessarily true, e.g.  it would be safe to eta-expand t2 (but not
 t1) in the following code:
@@ -403,7 +406,7 @@ published papers on Call Arity describe it.
 
 In practice, there are thunks that do a just little work, such as
 pattern-matching on a variable, and the benefits of eta-expansion likely
-oughtweigh the cost of doing that repeatedly. Therefore, this implementation of
+outweigh the cost of doing that repeatedly. Therefore, this implementation of
 Call Arity considers everything that is not cheap (`exprIsCheap`) as a thunk.
 
 Note [Call Arity and Join Points]
@@ -671,11 +674,11 @@ callArityRecEnv any_boring ae_rhss ae_body
 
     cross_calls
         -- See Note [Taking boring variables into account]
-        | any_boring          = completeGraph (domRes ae_combined)
+        | any_boring               = completeGraph (domRes ae_combined)
         -- Also, calculating cross_calls is expensive. Simply be conservative
         -- if the mutually recursive group becomes too large.
-        | length ae_rhss > 25 = completeGraph (domRes ae_combined)
-        | otherwise           = unionUnVarGraphs $ map cross_call ae_rhss
+        | lengthExceeds ae_rhss 25 = completeGraph (domRes ae_combined)
+        | otherwise                = unionUnVarGraphs $ map cross_call ae_rhss
     cross_call (v, ae_rhs) = completeBipartiteGraph called_by_v called_with_v
       where
         is_thunk = idCallArity v == 0

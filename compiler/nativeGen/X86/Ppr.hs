@@ -23,6 +23,8 @@ where
 #include "HsVersions.h"
 #include "nativeGen/NCG.h"
 
+import GhcPrelude
+
 import X86.Regs
 import X86.Instr
 import X86.Cond
@@ -32,12 +34,14 @@ import Reg
 import PprBase
 
 
-import Hoopl
+import Hoopl.Collections
+import Hoopl.Label
 import BasicTypes       (Alignment)
 import DynFlags
 import Cmm              hiding (topInfoTable)
+import BlockId
 import CLabel
-import Unique           ( pprUniqueAlways, Uniquable(..) )
+import Unique           ( pprUniqueAlways )
 import Platform
 import FastString
 import Outputable
@@ -125,7 +129,7 @@ pprBasicBlock info_env (BasicBlock blockid instrs)
     (if debugLevel dflags > 0
      then ppr (mkAsmTempEndLabel asmLbl) <> char ':' else empty)
   where
-    asmLbl = mkAsmTempLabel (getUnique blockid)
+    asmLbl = blockLbl blockid
     maybe_infotable = case mapLookup blockid info_env of
        Nothing   -> empty
        Just (Statics info_lbl info) ->
@@ -515,7 +519,7 @@ pprDataItem' dflags lit
 
 
 asmComment :: SDoc -> SDoc
-asmComment c = ifPprDebug $ text "# " <> c
+asmComment c = whenPprDebug $ text "# " <> c
 
 pprInstr :: Instr -> SDoc
 
@@ -644,6 +648,9 @@ pprInstr (POPCNT format src dst) = pprOpOp (sLit "popcnt") format src (OpReg dst
 pprInstr (BSF format src dst)    = pprOpOp (sLit "bsf")    format src (OpReg dst)
 pprInstr (BSR format src dst)    = pprOpOp (sLit "bsr")    format src (OpReg dst)
 
+pprInstr (PDEP format src mask dst)   = pprFormatOpOpReg (sLit "pdep") format src mask dst
+pprInstr (PEXT format src mask dst)   = pprFormatOpOpReg (sLit "pext") format src mask dst
+
 pprInstr (PREFETCH NTA format src ) = pprFormatOp_ (sLit "prefetchnta") format src
 pprInstr (PREFETCH Lvl0 format src) = pprFormatOp_ (sLit "prefetcht0") format src
 pprInstr (PREFETCH Lvl1 format src) = pprFormatOp_ (sLit "prefetcht1") format src
@@ -701,7 +708,7 @@ pprInstr (SETCC cond op) = pprCondInstr (sLit "set") cond (pprOperand II8 op)
 
 pprInstr (JXX cond blockid)
   = pprCondInstr (sLit "j") cond (ppr lab)
-  where lab = mkAsmTempLabel (getUnique blockid)
+  where lab = blockLbl blockid
 
 pprInstr        (JXX_GBL cond imm) = pprCondInstr (sLit "j") cond (pprImm imm)
 
@@ -724,6 +731,7 @@ pprInstr (MUL format op1 op2) = pprFormatOpOp (sLit "mul") format op1 op2
 pprInstr (MUL2 format op) = pprFormatOp (sLit "mul") format op
 
 pprInstr (FDIV format op1 op2) = pprFormatOpOp (sLit "div") format op1 op2
+pprInstr (SQRT format op1 op2) = pprFormatOpReg (sLit "sqrt") format op1 op2
 
 pprInstr (CVTSS2SD from to)      = pprRegReg (sLit "cvtss2sd") from to
 pprInstr (CVTSD2SS from to)      = pprRegReg (sLit "cvtsd2ss") from to
@@ -1257,6 +1265,16 @@ pprFormatRegRegReg name format reg1 reg2 reg3
         pprReg format reg3
     ]
 
+pprFormatOpOpReg :: LitString -> Format -> Operand -> Operand -> Reg -> SDoc
+pprFormatOpOpReg name format op1 op2 reg3
+  = hcat [
+        pprMnemonic name format,
+        pprOperand format op1,
+        comma,
+        pprOperand format op2,
+        comma,
+        pprReg format reg3
+    ]
 
 pprFormatAddrReg :: LitString -> Format -> AddrMode -> Reg -> SDoc
 pprFormatAddrReg name format op dst

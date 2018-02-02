@@ -6,10 +6,11 @@ test('haddock.base',
      [extra_files(['../../../../libraries/base/dist-install/haddock.t']),
       unless(in_tree_compiler(), skip), req_haddock
      ,stats_num_field('bytes allocated',
-          [(platform('x86_64-unknown-mingw32'), 24286343184, 5)
+          [(platform('x86_64-unknown-mingw32'), 18733710728, 5)
             # 2017-02-19                        24286343184 (x64/Windows) - Generalize kind of (->)
+            # 2017-12-24                        18733710728 (x64/Windows) - Unknown
 
-          ,(wordsize(64), 25592972912, 5)
+          ,(wordsize(64), 19694554424, 5)
             # 2012-08-14:  5920822352 (amd64/Linux)
             # 2012-09-20:  5829972376 (amd64/Linux)
             # 2012-10-08:  5902601224 (amd64/Linux)
@@ -39,6 +40,10 @@ test('haddock.base',
             # 2017-02-16: 32695562088 Better Lint for join points
             # 2017-02-17: 38425793776 (x86_64/Linux) - Generalize kind of (->)
             # 2017-02-12: 25592972912 (x86_64/Linux) - Type-indexed Typeable
+            # 2017-06-05: 27868466432 (x86_64/Linux) - Desugar modules compiled with -fno-code
+            # 2017-06-06: 25173968808 (x86_64/Linux) - Don't pass on -dcore-lint in Haddock.mk
+            # 2017-07-12: 23677299848 (x86_64/Linux) - Use getNameToInstancesIndex
+            # 2017-08-22: 19694554424 (x86_64/Linux) - Various Haddock optimizations
 
           ,(platform('i386-unknown-mingw32'), 2885173512, 5)
             # 2013-02-10:                     3358693084 (x86/Windows)
@@ -65,7 +70,7 @@ test('haddock.Cabal',
      [extra_files(['../../../../libraries/Cabal/Cabal/dist-install/haddock.t']),
       unless(in_tree_compiler(), skip), req_haddock
      ,stats_num_field('bytes allocated',
-          [(wordsize(64), 18865432648, 5)
+          [(wordsize(64), 25261834904, 5)
             # 2012-08-14:  3255435248 (amd64/Linux)
             # 2012-08-29:  3324606664 (amd64/Linux, new codegen)
             # 2012-10-08:  3373401360 (amd64/Linux)
@@ -110,6 +115,14 @@ test('haddock.Cabal',
             # 2017-02-16: 23867276992  Better Lint for join points
             # 2017-02-17: 27784875792 (amd64/Linux) - Generalize kind of (->)
             # 2017-02-12: 18865432648 (amd64/Linux) - Type-indexed Typeable
+            # 2017-05-31: 18269309128 (amd64/Linux) - Faster checkFamInstConsistency
+            # 2017-06-05: 22294859000 (amd64/Linux) - Desugar modules compiled with -fno-code
+            # 2017-06-05: 18753963960 (amd64/Linux) - Don't pass on -dcore-lint in Haddock.mk
+            # 2017-08-22: 15857428040 (amd64/Linux) - Various Haddock optimizations
+            # 2017-11-02: 17133915848 (amd64/Linux) - Phabricator D4144
+            # 2017-11-06: 18936339648 (amd64/Linux) - Unknown
+            # 2017-11-09: 20104611952 (amd64/Linux) - Bump Cabal
+            # 2018-01-22: 25261834904 (amd64/Linux) - Bump Cabal
 
           ,(platform('i386-unknown-mingw32'), 3293415576, 5)
             # 2012-10-30:                     1733638168 (x86/Windows)
@@ -133,7 +146,9 @@ test('haddock.compiler',
      [extra_files(['../../../../compiler/stage2/haddock.t']),
       unless(in_tree_compiler(), skip), req_haddock
      ,stats_num_field('bytes allocated',
-          [(wordsize(64), 55777283352, 10)
+          [(platform('x86_64-unknown-mingw32'),   56775301896, 10),
+            # 2017-12-24:                     56775301896 (x64/Windows)
+            (wordsize(64), 51592019560, 10)
             # 2012-08-14: 26070600504 (amd64/Linux)
             # 2012-08-29: 26353100288 (amd64/Linux, new CG)
             # 2012-09-18: 26882813032 (amd64/Linux)
@@ -151,6 +166,10 @@ test('haddock.compiler',
             # 2016-11-29: 60911147344 (amd64/Linux) unknown cause
             # 2017-02-11: 62070477608 (amd64/Linux) OccurAnal / One-Shot  (#13227) (and others)
             # 2017-02-25: 55777283352 (amd64/Linux) Early inline patch
+            # 2017-05-31: 52762752968 (amd64/Linux) Faster checkFamInstConsistency
+            # 2017-06-05: 65378619232 (amd64/Linux) Desugar modules compiled with -fno-code
+            # 2017-06-06: 55990521024 (amd64/Linux) Don't pass on -dcore-lint in Haddock.mk
+            # 2017-07-12: 51592019560 (amd64/Linux) Use getNameToInstancesIndex
 
           ,(platform('i386-unknown-mingw32'),   367546388, 10)
             # 2012-10-30:                     13773051312 (x86/Windows)

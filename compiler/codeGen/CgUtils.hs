@@ -12,9 +12,12 @@ module CgUtils ( fixStgRegisters ) where
 
 #include "HsVersions.h"
 
+import GhcPrelude
+
 import CodeGen.Platform
 import Cmm
-import Hoopl
+import Hoopl.Block
+import Hoopl.Graph
 import CmmUtils
 import CLabel
 import DynFlags

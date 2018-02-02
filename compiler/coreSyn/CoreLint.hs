@@ -21,6 +21,8 @@ module CoreLint (
 
 #include "HsVersions.h"
 
+import GhcPrelude
+
 import CoreSyn
 import CoreFVs
 import CoreUtils
@@ -64,10 +66,10 @@ import Demand ( splitStrictSig, isBotRes )
 import HscTypes
 import DynFlags
 import Control.Monad
-#if __GLASGOW_HASKELL__ > 710
 import qualified Control.Monad.Fail as MonadFail
-#endif
 import MonadUtils
+import Data.Foldable      ( toList )
+import Data.List.NonEmpty ( NonEmpty )
 import Data.Maybe
 import Pair
 import qualified GHC.LanguageExtensions as LangExt
@@ -200,8 +202,8 @@ points but not the RHSes of value bindings (thunks and functions).
 ************************************************************************
 
 These functions are not CoreM monad stuff, but they probably ought to
-be, and it makes a conveneint place.  place for them.  They print out
-stuff before and after core passes, and do Core Lint when necessary.
+be, and it makes a convenient place for them.  They print out stuff
+before and after core passes, and do Core Lint when necessary.
 -}
 
 endPass :: CoreToDo -> CoreProgram -> [CoreRule] -> CoreM ()
@@ -266,13 +268,14 @@ coreDumpFlag (CoreDoFloatOutwards {}) = Just Opt_D_verbose_core2core
 coreDumpFlag CoreLiberateCase         = Just Opt_D_verbose_core2core
 coreDumpFlag CoreDoStaticArgs         = Just Opt_D_verbose_core2core
 coreDumpFlag CoreDoCallArity          = Just Opt_D_dump_call_arity
+coreDumpFlag CoreDoExitify            = Just Opt_D_dump_exitify
 coreDumpFlag CoreDoStrictness         = Just Opt_D_dump_stranal
 coreDumpFlag CoreDoWorkerWrapper      = Just Opt_D_dump_worker_wrapper
 coreDumpFlag CoreDoSpecialising       = Just Opt_D_dump_spec
 coreDumpFlag CoreDoSpecConstr         = Just Opt_D_dump_spec
 coreDumpFlag CoreCSE                  = Just Opt_D_dump_cse
 coreDumpFlag CoreDoVectorisation      = Just Opt_D_dump_vect
-coreDumpFlag CoreDesugar              = Just Opt_D_dump_ds
+coreDumpFlag CoreDesugar              = Just Opt_D_dump_ds_preopt
 coreDumpFlag CoreDesugarOpt           = Just Opt_D_dump_ds
 coreDumpFlag CoreTidy                 = Just Opt_D_dump_simpl
 coreDumpFlag CorePrep                 = Just Opt_D_dump_prep
@@ -455,8 +458,16 @@ lintCoreBindings dflags pass local_in_scope binds
 *                                                                      *
 ************************************************************************
 
-We use this to check all unfoldings that come in from interfaces
-(it is very painful to catch errors otherwise):
+Note [Linting Unfoldings from Interfaces]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+We use this to check all top-level unfoldings that come in from interfaces
+(it is very painful to catch errors otherwise).
+
+We do not need to call lintUnfolding on unfoldings that are nested within
+top-level unfoldings; they are linted when we lint the top-level unfolding;
+hence the `TopLevelFlag` on `tcPragExpr` in TcIface.
+
 -}
 
 lintUnfolding :: DynFlags
@@ -548,6 +559,7 @@ lintSingleBinding top_lvl_flag rec_flag (binder,rhs)
                                   (mkInvalidJoinPointMsg binder binder_ty)
 
        ; when (lf_check_inline_loop_breakers flags
+               && isStableUnfolding (realIdUnfolding binder)
                && isStrongLoopBreaker (idOccInfo binder)
                && isInlinePragma (idInlinePragma binder))
               (addWarnL (text "INLINE binder is (non-rule) loop breaker:" <+> ppr binder))
@@ -566,7 +578,7 @@ lintSingleBinding top_lvl_flag rec_flag (binder,rhs)
        -- Check that the binder's arity is within the bounds imposed by
        -- the type and the strictness signature. See Note [exprArity invariant]
        -- and Note [Trimming arity]
-       ; checkL (idArity binder <= length (typeArity (idType binder)))
+       ; checkL (typeArity (idType binder) `lengthAtLeast` idArity binder)
            (text "idArity" <+> ppr (idArity binder) <+>
            text "exceeds typeArity" <+>
            ppr (length (typeArity (idType binder))) <> colon <+>
@@ -574,7 +586,7 @@ lintSingleBinding top_lvl_flag rec_flag (binder,rhs)
 
        ; case splitStrictSig (idStrictness binder) of
            (demands, result_info) | isBotRes result_info ->
-             checkL (idArity binder <= length demands)
+             checkL (demands `lengthAtLeast` idArity binder)
                (text "idArity" <+> ppr (idArity binder) <+>
                text "exceeds arity imposed by the strictness signature" <+>
                ppr (idStrictness binder) <> colon <+>
@@ -787,13 +799,9 @@ lintCoreExpr e@(Case scrut var alt_ty alts) =
      ; (alt_ty, _) <- lintInTy alt_ty
      ; (var_ty, _) <- lintInTy (idType var)
 
-     -- See Note [No alternatives lint check]
-     ; when (null alts) $
-     do { checkL (not (exprIsHNF scrut))
-          (text "No alternatives for a case scrutinee in head-normal form:" <+> ppr scrut)
-        ; checkWarnL scrut_diverges
-          (text "No alternatives for a case scrutinee not known to diverge for sure:" <+> ppr scrut)
-        }
+     -- We used to try to check whether a case expression with no
+     -- alternatives was legitimate, but this didn't work.
+     -- See Note [No alternatives lint check] for details.
 
      -- See Note [Rules for floating-point comparisons] in PrelRules
      ; let isLitPat (LitAlt _, _ , _) = True
@@ -920,23 +928,46 @@ checkJoinOcc var n_args
 {-
 Note [No alternatives lint check]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Case expressions with no alternatives are odd beasts, and worth looking at
-in the linter (cf Trac #10180).  We check two things:
+Case expressions with no alternatives are odd beasts, and it would seem
+like they would worth be looking at in the linter (cf Trac #10180). We
+used to check two things:
 
-* exprIsHNF is false: certainly, it would be terribly wrong if the
-  scrutinee was already in head normal form.
+* exprIsHNF is false: it would *seem* to be terribly wrong if
+  the scrutinee was already in head normal form.
 
 * exprIsBottom is true: we should be able to see why GHC believes the
   scrutinee is diverging for sure.
 
-In principle, the first check is redundant: exprIsBottom == True will
-always imply exprIsHNF == False.  But the first check is reliable: If
-exprIsHNF == True, then there definitely is a problem (exprIsHNF errs
-on the right side).  If the second check triggers then it may be the
-case that the compiler got smarter elsewhere, and the empty case is
-correct, but that exprIsBottom is unable to see it. In particular, the
-empty-type check in exprIsBottom is an approximation. Therefore, this
-check is not fully reliable, and we keep both around.
+It was already known that the second test was not entirely reliable.
+Unfortunately (Trac #13990), the first test turned out not to be reliable
+either. Getting the checks right turns out to be somewhat complicated.
+
+For example, suppose we have (comment 8)
+
+  data T a where
+    TInt :: T Int
+
+  absurdTBool :: T Bool -> a
+  absurdTBool v = case v of
+
+  data Foo = Foo !(T Bool)
+
+  absurdFoo :: Foo -> a
+  absurdFoo (Foo x) = absurdTBool x
+
+GHC initially accepts the empty case because of the GADT conditions. But then
+we inline absurdTBool, getting
+
+  absurdFoo (Foo x) = case x of
+
+x is in normal form (because the Foo constructor is strict) but the
+case is empty. To avoid this problem, GHC would have to recognize
+that matching on Foo x is already absurd, which is not so easy.
+
+More generally, we don't really know all the ways that GHC can
+lose track of why an expression is bottom, so we shouldn't make too
+much fuss when that happens.
+
 
 Note [Beta redexes]
 ~~~~~~~~~~~~~~~~~~~
@@ -1288,12 +1319,12 @@ lintType ty@(TyConApp tc tys)
   -- should be represented with the FunTy constructor. See Note [Linting
   -- function types] and Note [Representation of function types].
   | isFunTyCon tc
-  , length tys == 4
+  , tys `lengthIs` 4
   = failWithL (hang (text "Saturated application of (->)") 2 (ppr ty))
 
   | isTypeSynonymTyCon tc || isTypeFamilyTyCon tc
        -- Also type synonyms and type families
-  , length tys < tyConArity tc
+  , tys `lengthLessThan` tyConArity tc
   = failWithL (hang (text "Un-saturated type application") 2 (ppr ty))
 
   | otherwise
@@ -1350,8 +1381,8 @@ lintArrow :: SDoc -> LintedKind -> LintedKind -> LintM LintedKind
 -- See Note [GHC Formalism]
 lintArrow what k1 k2   -- Eg lintArrow "type or kind `blah'" k1 k2
                        -- or lintarrow "coercion `blah'" k1 k2
-  = do { unless (okArrowArgKind k1)    (addErrL (msg (text "argument") k1))
-       ; unless (okArrowResultKind k2) (addErrL (msg (text "result")   k2))
+  = do { unless (classifiesTypeWithValues k1) (addErrL (msg (text "argument") k1))
+       ; unless (classifiesTypeWithValues k2) (addErrL (msg (text "result")   k2))
        ; return liftedTypeKind }
   where
     msg ar k
@@ -1390,23 +1421,28 @@ lint_app doc kfn kas
          -- Note [The substitution invariant] in TyCoRep
          ; foldlM (go_app in_scope) kfn kas }
   where
-    fail_msg = vcat [ hang (text "Kind application error in") 2 doc
-                    , nest 2 (text "Function kind =" <+> ppr kfn)
-                    , nest 2 (text "Arg kinds =" <+> ppr kas) ]
+    fail_msg extra = vcat [ hang (text "Kind application error in") 2 doc
+                          , nest 2 (text "Function kind =" <+> ppr kfn)
+                          , nest 2 (text "Arg kinds =" <+> ppr kas)
+                          , extra ]
 
-    go_app in_scope kfn ka
+    go_app in_scope kfn tka
       | Just kfn' <- coreView kfn
-      = go_app in_scope kfn' ka
+      = go_app in_scope kfn' tka
 
-    go_app _ (FunTy kfa kfb) (_,ka)
-      = do { unless (ka `eqType` kfa) (addErrL fail_msg)
+    go_app _ (FunTy kfa kfb) tka@(_,ka)
+      = do { unless (ka `eqType` kfa) $
+             addErrL (fail_msg (text "Fun:" <+> (ppr kfa $$ ppr tka)))
            ; return kfb }
 
-    go_app in_scope (ForAllTy (TvBndr kv _vis) kfn) (ta,ka)
-      = do { unless (ka `eqType` tyVarKind kv) (addErrL fail_msg)
+    go_app in_scope (ForAllTy (TvBndr kv _vis) kfn) tka@(ta,ka)
+      = do { let kv_kind = tyVarKind kv
+           ; unless (ka `eqType` kv_kind) $
+             addErrL (fail_msg (text "Forall:" <+> (ppr kv $$ ppr kv_kind $$ ppr tka)))
            ; return (substTyWithInScope in_scope [kv] [ta] kfn) }
 
-    go_app _ _ _ = failWithL fail_msg
+    go_app _ kfn ka
+       = failWithL (fail_msg (text "Not a fun:" <+> (ppr kfn $$ ppr ka)))
 
 {- *********************************************************************
 *                                                                      *
@@ -1630,8 +1666,6 @@ lintCoercion co@(UnivCo prov r ty1 ty2)
                                     ; check_kinds kco k1 k2 }
 
            PluginProv _     -> return ()  -- no extra checks
-           HoleProv h       -> addErrL $
-                               text "Unfilled coercion hole:" <+> ppr h
 
        ; when (r /= Phantom && classifiesTypeWithValues k1
                             && classifiesTypeWithValues k2)
@@ -1668,8 +1702,8 @@ lintCoercion co@(UnivCo prov r ty1 ty2)
        = do { dflags <- getDynFlags
             ; checkWarnL (isUnBoxed rep1 == isUnBoxed rep2)
                          (report "between unboxed and boxed value")
-            ; checkWarnL (TyCon.primRepSizeW dflags rep1
-                           == TyCon.primRepSizeW dflags rep2)
+            ; checkWarnL (TyCon.primRepSizeB dflags rep1
+                           == TyCon.primRepSizeB dflags rep2)
                          (report "between unboxed values of different size")
             ; let fl = liftM2 (==) (TyCon.primRepIsFloat rep1)
                                    (TyCon.primRepIsFloat rep2)
@@ -1715,7 +1749,7 @@ lintCoercion the_co@(NthCo n co)
              , isInjectiveTyCon tc_s r
                  -- see Note [NthCo and newtypes] in TyCoRep
              , tys_s `equalLength` tys_t
-             , n < length tys_s
+             , tys_s `lengthExceeds` n
              -> return (ks, kt, ts, tt, tr)
              where
                ts = getNth tys_s n
@@ -1766,7 +1800,7 @@ lintCoercion co@(AxiomInstCo con ind cos)
                         , cab_roles = roles
                         , cab_lhs   = lhs
                         , cab_rhs   = rhs } = coAxiomNthBranch con ind
-       ; unless (length ktvs + length cvs == length cos) $
+       ; unless (cos `equalLength` (ktvs ++ cvs)) $
            bad_ax (text "lengths")
        ; subst <- getTCvSubst
        ; let empty_subst = zapTCvSubst subst
@@ -1837,6 +1871,11 @@ lintCoercion this@(AxiomRuleCo co cs)
   lintRoles n es []  = err "Not enough coercion arguments"
                           [ text "Expected:" <+> int (n + length es)
                           , text "Provided:" <+> int n ]
+
+lintCoercion (HoleCo h)
+  = do { addErrL $ text "Unfilled coercion hole:" <+> ppr h
+       ; lintCoercion (CoVarCo (coHoleCoVar h)) }
+
 
 ----------
 lintUnliftedCoVar :: CoVar -> LintM ()
@@ -1942,17 +1981,15 @@ instance Applicative LintM where
       (<*>) = ap
 
 instance Monad LintM where
-  fail err = failWithL (text err)
+  fail = MonadFail.fail
   m >>= k  = LintM (\ env errs ->
                        let (res, errs') = unLintM m env errs in
                          case res of
                            Just r -> unLintM (k r) env errs'
                            Nothing -> (Nothing, errs'))
 
-#if __GLASGOW_HASKELL__ > 710
 instance MonadFail.MonadFail LintM where
     fail err = failWithL (text err)
-#endif
 
 instance HasDynFlags LintM where
   getDynFlags = LintM (\ e errs -> (Just (le_dynflags e), errs))
@@ -2017,10 +2054,9 @@ addMsg env msgs msg
    locs = le_loc env
    (loc, cxt1) = dumpLoc (head locs)
    cxts        = [snd (dumpLoc loc) | loc <- locs]
-   context     = sdocWithPprDebug $ \dbg -> if dbg
-                  then vcat (reverse cxts) $$ cxt1 $$
-                         text "Substitution:" <+> ppr (le_subst env)
-                  else cxt1
+   context     = ifPprDebug (vcat (reverse cxts) $$ cxt1 $$
+                             text "Substitution:" <+> ppr (le_subst env))
+                            cxt1
 
    mk_msg msg = mkLocMessage SevWarning (mkSrcSpan loc loc) (context $$ msg)
 
@@ -2431,15 +2467,15 @@ pprLeftOrRight :: LeftOrRight -> MsgDoc
 pprLeftOrRight CLeft  = text "left"
 pprLeftOrRight CRight = text "right"
 
-dupVars :: [[Var]] -> MsgDoc
+dupVars :: [NonEmpty Var] -> MsgDoc
 dupVars vars
   = hang (text "Duplicate variables brought into scope")
-       2 (ppr vars)
+       2 (ppr (map toList vars))
 
-dupExtVars :: [[Name]] -> MsgDoc
+dupExtVars :: [NonEmpty Name] -> MsgDoc
 dupExtVars vars
   = hang (text "Duplicate top-level variables with the same qualified name")
-       2 (ppr vars)
+       2 (ppr (map toList vars))
 
 {-
 ************************************************************************

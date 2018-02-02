@@ -3,8 +3,9 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE MultiWayIf #-}
 
-{-# OPTIONS_GHC -O -funbox-strict-fields #-}
+{-# OPTIONS_GHC -O2 -funbox-strict-fields #-}
 -- We always optimise this, otherwise performance of a non-optimised
 -- compiler is severely affected
 
@@ -59,6 +60,8 @@ module Binary
 -- The *host* architecture version:
 #include "../includes/MachDeps.h"
 
+import GhcPrelude
+
 import {-# SOURCE #-} Name (Name)
 import FastString
 import Panic
@@ -80,7 +83,7 @@ import Data.Time
 import Type.Reflection
 import Type.Reflection.Unsafe
 import Data.Kind (Type)
-import GHC.Exts (RuntimeRep(..), VecCount(..), VecElem(..))
+import GHC.Exts (TYPE, RuntimeRep(..), VecCount(..), VecElem(..))
 #else
 import Data.Typeable
 #endif
@@ -336,7 +339,7 @@ getByte :: BinHandle -> IO Word8
 getByte h = getWord8 h
 
 -- -----------------------------------------------------------------------------
--- Primitve Word writes
+-- Primitive Word writes
 
 instance Binary Word8 where
   put_ = putWord8
@@ -355,7 +358,7 @@ instance Binary Word64 where
   get h = getWord64 h
 
 -- -----------------------------------------------------------------------------
--- Primitve Int writes
+-- Primitive Int writes
 
 instance Binary Int8 where
   put_ h w = put_ h (fromIntegral w :: Word8)
@@ -498,7 +501,7 @@ instance Binary DiffTime where
 --
 -- TODO  This instance is not architecture portable.  GMP stores numbers as
 -- arrays of machine sized words, so the byte format is not portable across
--- architectures with different endianess and word size.
+-- architectures with different endianness and word size.
 --
 -- This makes it hard (impossible) to make an equivalent instance
 -- with code that is compilable with non-GHC.  Do we need any instance
@@ -746,14 +749,18 @@ getSomeTypeRep bh = do
                        ]
         3 -> do SomeTypeRep arg <- getSomeTypeRep bh
                 SomeTypeRep res <- getSomeTypeRep bh
-                case typeRepKind arg `eqTypeRep` (typeRep :: TypeRep Type) of
-                  Just HRefl ->
-                      case typeRepKind res `eqTypeRep` (typeRep :: TypeRep Type) of
-                        Just HRefl -> return $ SomeTypeRep $ Fun arg res
-                        Nothing -> failure "Kind mismatch" []
-                  _ -> failure "Kind mismatch" []
+                if
+                  | App argkcon _ <- typeRepKind arg
+                  , App reskcon _ <- typeRepKind res
+                  , Just HRefl <- argkcon `eqTypeRep` tYPErep
+                  , Just HRefl <- reskcon `eqTypeRep` tYPErep
+                  -> return $ SomeTypeRep $ Fun arg res
+                  | otherwise -> failure "Kind mismatch" []
         _ -> failure "Invalid SomeTypeRep" []
   where
+    tYPErep :: TypeRep TYPE
+    tYPErep = typeRep
+
     failure description info =
         fail $ unlines $ [ "Binary.getSomeTypeRep: "++description ]
                       ++ map ("    "++) info
@@ -1031,14 +1038,14 @@ instance Binary RuleMatchInfo where
                       else return FunLike
 
 instance Binary InlineSpec where
-    put_ bh EmptyInlineSpec = putByte bh 0
+    put_ bh NoUserInline    = putByte bh 0
     put_ bh Inline          = putByte bh 1
     put_ bh Inlinable       = putByte bh 2
     put_ bh NoInline        = putByte bh 3
 
     get bh = do h <- getByte bh
                 case h of
-                  0 -> return EmptyInlineSpec
+                  0 -> return NoUserInline
                   1 -> return Inline
                   2 -> return Inlinable
                   _ -> return NoInline

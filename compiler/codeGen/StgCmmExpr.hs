@@ -13,6 +13,8 @@ module StgCmmExpr ( cgExpr ) where
 
 #include "HsVersions.h"
 
+import GhcPrelude hiding ((<*>))
+
 import {-# SOURCE #-} StgCmmBind ( cgBind )
 
 import StgCmmMonad
@@ -50,8 +52,6 @@ import Outputable
 import Control.Monad (unless,void)
 import Control.Arrow (first)
 import Data.Function ( on )
-
-import Prelude hiding ((<*>))
 
 ------------------------------------------------------------------------
 --              cgExpr: the main function
@@ -304,6 +304,7 @@ cgCase (StgOpApp (StgPrimOp op) args _) bndr (AlgAlt tycon) alts
 
        ; (mb_deflt, branches) <- cgAlgAltRhss (NoGcInAlts,AssignedDirectly)
                                               (NonVoid bndr) alts
+                                 -- See Note [GC for conditionals]
        ; emitSwitch tag_expr branches mb_deflt 0 (tyConFamilySize tycon - 1)
        ; return AssignedDirectly
        }
@@ -469,7 +470,8 @@ cgCase scrut bndr alt_type alts
        ; let ret_bndrs = chooseReturnBndrs bndr alt_type alts
              alt_regs  = map (idToReg dflags) ret_bndrs
        ; simple_scrut <- isSimpleScrut scrut alt_type
-       ; let do_gc  | not simple_scrut = True
+       ; let do_gc  | is_cmp_op scrut  = False  -- See Note [GC for conditionals]
+                    | not simple_scrut = True
                     | isSingleton alts = False
                     | up_hp_usg > 0    = False
                     | otherwise        = True
@@ -484,11 +486,29 @@ cgCase scrut bndr alt_type alts
        ; _ <- bindArgsToRegs ret_bndrs
        ; cgAlts (gc_plan,ret_kind) (NonVoid bndr) alt_type alts
        }
+  where
+    is_cmp_op (StgOpApp (StgPrimOp op) _ _) = isComparisonPrimOp op
+    is_cmp_op _                             = False
 
+{- Note [GC for conditionals]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+For boolean conditionals it seems that we have always done NoGcInAlts.
+That is, we have always done the GC check before the conditional.
+This is enshrined in the special case for
+   case tagToEnum# (a>b) of ...
+See Note [case on bool]
 
-{-
+It's odd, and it's flagrantly inconsistent with the rules described
+Note [Compiling case expressions].  However, after eliminating the
+tagToEnum# (Trac #13397) we will have:
+   case (a>b) of ...
+Rather than make it behave quite differently, I am testing for a
+comparison operator here in in the general case as well.
+
+ToDo: figure out what the Right Rule should be.
+
 Note [scrut sequel]
-
+~~~~~~~~~~~~~~~~~~~
 The job of the scrutinee is to assign its value(s) to alt_regs.
 Additionally, if we plan to do a heap-check in the alternatives (see
 Note [Compiling case expressions]), then we *must* retreat Hp to
@@ -542,7 +562,7 @@ chooseReturnBndrs bndr (PrimAlt _) _alts
   = assertNonVoidIds [bndr]
 
 chooseReturnBndrs _bndr (MultiValAlt n) [(_, ids, _)]
-  = ASSERT2(n == length ids, ppr n $$ ppr ids $$ ppr _bndr)
+  = ASSERT2(ids `lengthIs` n, ppr n $$ ppr ids $$ ppr _bndr)
     assertNonVoidIds ids     -- 'bndr' is not assigned!
 
 chooseReturnBndrs bndr (AlgAlt _) _alts
@@ -596,13 +616,12 @@ cgAlts gc_plan bndr (AlgAlt tycon) alts
                    branches' = [(tag+1,branch) | (tag,branch) <- branches]
                 emitSwitch tag_expr branches' mb_deflt 1 fam_sz
 
-           else         -- No, get tag from info table
-                do dflags <- getDynFlags
-                   let -- Note that ptr _always_ has tag 1
-                       -- when the family size is big enough
-                       untagged_ptr = cmmRegOffB bndr_reg (-1)
-                       tag_expr = getConstrTag dflags (untagged_ptr)
-                   emitSwitch tag_expr branches mb_deflt 0 (fam_sz - 1)
+           else -- No, get tag from info table
+                let -- Note that ptr _always_ has tag 1
+                    -- when the family size is big enough
+                    untagged_ptr = cmmRegOffB bndr_reg (-1)
+                    tag_expr = getConstrTag dflags (untagged_ptr)
+                in emitSwitch tag_expr branches mb_deflt 0 (fam_sz - 1)
 
         ; return AssignedDirectly }
 

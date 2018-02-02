@@ -6,8 +6,8 @@
 Buffers for scanning string input stored in external arrays.
 -}
 
-{-# LANGUAGE CPP, MagicHash, UnboxedTuples #-}
-{-# OPTIONS_GHC -O #-}
+{-# LANGUAGE BangPatterns, CPP, MagicHash, UnboxedTuples #-}
+{-# OPTIONS_GHC -O2 #-}
 -- We always optimise this, otherwise performance of a non-optimised
 -- compiler is severely affected
 
@@ -32,6 +32,7 @@ module StringBuffer
         stepOn,
         offsetBytes,
         byteDiff,
+        atLine,
 
         -- * Conversion
         lexemeToString,
@@ -43,6 +44,8 @@ module StringBuffer
        ) where
 
 #include "HsVersions.h"
+
+import GhcPrelude
 
 import Encoding
 import FastString
@@ -240,6 +243,43 @@ byteDiff s1 s2 = cur s2 - cur s1
 atEnd :: StringBuffer -> Bool
 atEnd (StringBuffer _ l c) = l == c
 
+-- | Computes a 'StringBuffer' which points to the first character of the
+-- wanted line. Lines begin at 1.
+atLine :: Int -> StringBuffer -> Maybe StringBuffer
+atLine line sb@(StringBuffer buf len _) =
+  inlinePerformIO $
+    withForeignPtr buf $ \p -> do
+      p' <- skipToLine line len p
+      if p' == nullPtr
+        then return Nothing
+        else
+          let
+            delta = p' `minusPtr` p
+          in return $ Just (sb { cur = delta
+                               , len = len - delta
+                               })
+
+skipToLine :: Int -> Int -> Ptr Word8 -> IO (Ptr Word8)
+skipToLine !line !len !op0 = go 1 op0
+  where
+    !opend = op0 `plusPtr` len
+
+    go !i_line !op
+      | op >= opend    = pure nullPtr
+      | i_line == line = pure op
+      | otherwise      = do
+          w <- peek op :: IO Word8
+          case w of
+            10 -> go (i_line + 1) (plusPtr op 1)
+            13 -> do
+              -- this is safe because a 'StringBuffer' is
+              -- guaranteed to have 3 bytes sentinel values.
+              w' <- peek (plusPtr op 1) :: IO Word8
+              case w' of
+                10 -> go (i_line + 1) (plusPtr op 2)
+                _  -> go (i_line + 1) (plusPtr op 1)
+            _  -> go i_line (plusPtr op 1)
+
 -- -----------------------------------------------------------------------------
 -- Conversion
 
@@ -251,9 +291,7 @@ lexemeToString :: StringBuffer
                -> String
 lexemeToString _ 0 = ""
 lexemeToString (StringBuffer buf _ cur) bytes =
-  inlinePerformIO $
-    withForeignPtr buf $ \ptr ->
-      utf8DecodeString (ptr `plusPtr` cur) bytes
+  utf8DecodeStringLazy buf cur bytes
 
 lexemeToFastString :: StringBuffer
                    -> Int               -- ^ @n@, the number of bytes
@@ -285,5 +323,6 @@ parseUnsignedInteger (StringBuffer buf _ cur) len radix char_to_int
   = inlinePerformIO $ withForeignPtr buf $ \ptr -> return $! let
     go i x | i == len  = x
            | otherwise = case fst (utf8DecodeChar (ptr `plusPtr` (cur + i))) of
+               '_'  -> go (i + 1) x    -- skip "_" (#14473)
                char -> go (i + 1) (x * radix + toInteger (char_to_int char))
   in go 0 0

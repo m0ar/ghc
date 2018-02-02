@@ -7,7 +7,13 @@ where
 
 #include "HsVersions.h"
 
-import Hoopl
+import GhcPrelude hiding (succ)
+
+import Hoopl.Block
+import Hoopl.Graph
+import Hoopl.Label
+import Hoopl.Collections
+import Hoopl.Dataflow
 import Digraph
 import Bitmap
 import CLabel
@@ -29,9 +35,6 @@ import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Control.Monad
-
-import qualified Prelude as P
-import Prelude hiding (succ)
 
 foldSet :: (a -> b -> b) -> b -> Set a -> b
 foldSet = Set.foldr
@@ -174,7 +177,7 @@ buildSRT dflags topSRT cafs =
                mkSRT topSRT =
                  do localSRTs <- procpointSRT dflags (lbl topSRT) (elt_map topSRT) cafs
                     return (topSRT, localSRTs)
-           in if length cafs > maxBmpSize dflags then
+           in if cafs `lengthExceeds` maxBmpSize dflags then
                 mkSRT (foldl add_if_missing topSRT cafs)
               else -- make sure all the cafs are near the bottom of the srt
                 mkSRT (add_if_too_far topSRT cafs)
@@ -216,7 +219,7 @@ procpointSRT dflags top_srt top_table entries =
     sorted_ints = sort ints
     offset = head sorted_ints
     bitmap_entries = map (subtract offset) sorted_ints
-    len = P.last bitmap_entries + 1
+    len = GhcPrelude.last bitmap_entries + 1
     bitmap = intsToBitmap dflags len bitmap_entries
 
 maxBmpSize :: DynFlags -> Int

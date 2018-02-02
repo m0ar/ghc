@@ -1,18 +1,28 @@
 module PprColour where
+import GhcPrelude
+
 import Data.Maybe (fromMaybe)
 import Util (OverridingBool(..), split)
+import Data.Semigroup as Semi
 
 -- | A colour\/style for use with 'coloured'.
-newtype PprColour = PprColour String
+newtype PprColour = PprColour { renderColour :: String }
+
+instance Semi.Semigroup PprColour where
+  PprColour s1 <> PprColour s2 = PprColour (s1 <> s2)
 
 -- | Allow colours to be combined (e.g. bold + red);
 --   In case of conflict, right side takes precedence.
 instance Monoid PprColour where
   mempty = PprColour mempty
-  PprColour s1 `mappend` PprColour s2 = PprColour (s1 `mappend` s2)
+  mappend = (<>)
+
+renderColourAfresh :: PprColour -> String
+renderColourAfresh c = renderColour (colReset `mappend` c)
 
 colCustom :: String -> PprColour
-colCustom s = PprColour ("\27[" ++ s ++ "m")
+colCustom "" = mempty
+colCustom s  = PprColour ("\27[" ++ s ++ "m")
 
 colReset :: PprColour
 colReset = colCustom "0"
@@ -46,7 +56,8 @@ colWhiteFg = colCustom "37"
 
 data Scheme =
   Scheme
-  { sMessage :: PprColour
+  { sHeader  :: PprColour
+  , sMessage :: PprColour
   , sWarning :: PprColour
   , sError   :: PprColour
   , sFatal   :: PprColour
@@ -56,7 +67,8 @@ data Scheme =
 defaultScheme :: Scheme
 defaultScheme =
   Scheme
-  { sMessage = colBold
+  { sHeader  = mempty
+  , sMessage = colBold
   , sWarning = colBold `mappend` colMagentaFg
   , sError   = colBold `mappend` colRedFg
   , sFatal   = colBold `mappend` colRedFg
@@ -72,7 +84,8 @@ parseScheme "never"  (_, cs) = (Never,  cs)
 parseScheme input    (b, cs) =
   ( b
   , Scheme
-    { sMessage = fromMaybe (sMessage cs) (lookup "message" table)
+    { sHeader  = fromMaybe (sHeader cs)  (lookup "header" table)
+    , sMessage = fromMaybe (sMessage cs) (lookup "message" table)
     , sWarning = fromMaybe (sWarning cs) (lookup "warning" table)
     , sError   = fromMaybe (sError cs)   (lookup "error"   table)
     , sFatal   = fromMaybe (sFatal cs)   (lookup "fatal"   table)

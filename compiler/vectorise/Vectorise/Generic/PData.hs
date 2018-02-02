@@ -8,6 +8,8 @@ module Vectorise.Generic.PData
   , buildPDatasTyCon )
 where
 
+import GhcPrelude
+
 import Vectorise.Monad
 import Vectorise.Builtins
 import Vectorise.Generic.Description
@@ -66,7 +68,7 @@ buildDataFamInst name' fam_tc vect_tc rhs
 buildPDataTyConRhs :: Name -> TyCon -> TyCon -> SumRepr -> VM AlgTyConRhs
 buildPDataTyConRhs orig_name vect_tc repr_tc repr
  = do data_con <- buildPDataDataCon orig_name vect_tc repr_tc repr
-      return $ DataTyCon { data_cons = [data_con], is_enum = False }
+      return $ mkDataTyConRhs [data_con]
 
 
 buildPDataDataCon :: Name -> TyCon -> TyCon -> SumRepr -> VM DataCon
@@ -76,19 +78,23 @@ buildPDataDataCon orig_name vect_tc repr_tc repr
       comp_tys  <- mkSumTys repr_sel_ty mkPDataType repr
       fam_envs  <- readGEnv global_fam_inst_env
       rep_nm    <- liftDs $ newTyConRepName dc_name
+      let univ_tvbs = mkTyVarBinders Specified tvs
+          tag_map = mkTyConTagMap repr_tc
       liftDs $ buildDataCon fam_envs dc_name
                             False                  -- not infix
                             rep_nm
                             (map (const no_bang) comp_tys)
                             (Just $ map (const HsLazy) comp_tys)
                             []                     -- no field labels
-                            (mkTyVarBinders Specified tvs)
+                            tvs
                             []                     -- no existentials
+                            univ_tvbs
                             []                     -- no eq spec
                             []                     -- no context
                             comp_tys
                             (mkFamilyTyConApp repr_tc (mkTyVarTys tvs))
                             repr_tc
+                            tag_map
   where
     no_bang = HsSrcBang NoSourceText NoSrcUnpack NoSrcStrict
 
@@ -109,7 +115,7 @@ buildPDatasTyCon orig_tc vect_tc repr
 buildPDatasTyConRhs :: Name -> TyCon -> TyCon -> SumRepr -> VM AlgTyConRhs
 buildPDatasTyConRhs orig_name vect_tc repr_tc repr
  = do data_con <- buildPDatasDataCon orig_name vect_tc repr_tc repr
-      return $ DataTyCon { data_cons = [data_con], is_enum = False }
+      return $ mkDataTyConRhs [data_con]
 
 
 buildPDatasDataCon :: Name -> TyCon -> TyCon -> SumRepr -> VM DataCon
@@ -120,19 +126,23 @@ buildPDatasDataCon orig_name vect_tc repr_tc repr
       comp_tys  <- mkSumTys repr_sels_ty mkPDatasType repr
       fam_envs <- readGEnv global_fam_inst_env
       rep_nm   <- liftDs $ newTyConRepName dc_name
+      let univ_tvbs = mkTyVarBinders Specified tvs
+          tag_map = mkTyConTagMap repr_tc
       liftDs $ buildDataCon fam_envs dc_name
                             False                  -- not infix
                             rep_nm
                             (map (const no_bang) comp_tys)
                             (Just $ map (const HsLazy) comp_tys)
                             []                     -- no field labels
-                            (mkTyVarBinders Specified tvs)
+                            tvs
                             []                     -- no existentials
+                            univ_tvbs
                             []                     -- no eq spec
                             []                     -- no context
                             comp_tys
                             (mkFamilyTyConApp repr_tc (mkTyVarTys tvs))
                             repr_tc
+                            tag_map
   where
      no_bang = HsSrcBang NoSourceText NoSrcUnpack NoSrcStrict
 

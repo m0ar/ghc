@@ -9,6 +9,8 @@
 --
 module RegAlloc.Linear.JoinToTargets (joinToTargets) where
 
+import GhcPrelude
+
 import RegAlloc.Linear.State
 import RegAlloc.Linear.Base
 import RegAlloc.Linear.FreeRegs
@@ -17,7 +19,7 @@ import Instruction
 import Reg
 
 import BlockId
-import Hoopl
+import Hoopl.Collections
 import Digraph
 import DynFlags
 import Outputable

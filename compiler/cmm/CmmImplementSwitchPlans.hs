@@ -4,7 +4,9 @@ module CmmImplementSwitchPlans
   )
 where
 
-import Hoopl
+import GhcPrelude
+
+import Hoopl.Block
 import BlockId
 import Cmm
 import CmmUtils

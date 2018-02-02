@@ -10,20 +10,24 @@ module CSE (cseProgram, cseOneExpr) where
 
 #include "HsVersions.h"
 
+import GhcPrelude
+
 import CoreSubst
 import Var              ( Var )
-import VarEnv           ( elemInScopeSet )
+import VarEnv           ( elemInScopeSet, mkInScopeSet )
 import Id               ( Id, idType, idInlineActivation, isDeadBinder
                         , zapIdOccInfo, zapIdUsageInfo, idInlinePragma
                         , isJoinId )
 import CoreUtils        ( mkAltExpr, eqExpr
                         , exprIsLiteralString
                         , stripTicksE, stripTicksT, mkTicks )
+import CoreFVs          ( exprFreeVars )
 import Type             ( tyConAppArgs )
 import CoreSyn
 import Outputable
 import BasicTypes       ( TopLevelFlag(..), isTopLevel
-                        , isAlwaysActive, isAnyInlinePragma )
+                        , isAlwaysActive, isAnyInlinePragma,
+                          inlinePragmaSpec, noUserInlineSpec )
 import TrieMap
 import Util             ( filterOut )
 import Data.List        ( mapAccumL )
@@ -204,8 +208,12 @@ is small).  The conclusion here is this:
   might replace <rhs> by 'bar', and then later be unable to see that it
   really was <rhs>.
 
+An except to the rule is when the INLINE pragma is not from the user, e.g. from
+WorkWrap (see Note [Wrapper activation]). We can tell because noUserInlineSpec
+is then true.
+
 Note that we do not (currently) do CSE on the unfolding stored inside
-an Id, even if is a 'stable' unfolding.  That means that when an
+an Id, even if it is a 'stable' unfolding.  That means that when an
 unfolding happens, it is always faithful to what the stable unfolding
 originally was.
 
@@ -282,7 +290,7 @@ with mutual recursion it's quite hard; but for self-recursive bindings
   Note the \f in the domain of the mapping!
 
 * When we come across the binding for 'g', look up (\g. (\y. ...g...))
-  Bingo we get a hit.  So we can repace the 'g' binding with
+  Bingo we get a hit.  So we can replace the 'g' binding with
      g = f
 
 We can't use cs_map for this, because the key isn't an expression of
@@ -352,15 +360,19 @@ cse_bind toplevel env (in_id, in_rhs) out_id
     (env', out_id') = addBinding env in_id out_id out_rhs
 
 addBinding :: CSEnv                      -- Includes InId->OutId cloning
-           -> InId
+           -> InVar                      -- Could be a let-bound type
            -> OutId -> OutExpr           -- Processed binding
            -> (CSEnv, OutId)             -- Final env, final bndr
 -- Extend the CSE env with a mapping [rhs -> out-id]
 -- unless we can instead just substitute [in-id -> rhs]
+--
+-- It's possible for the binder to be a type variable (see
+-- Note [Type-let] in CoreSyn), in which case we can just substitute.
 addBinding env in_id out_id rhs'
-  | noCSE in_id = (env,                              out_id)
-  | use_subst   = (extendCSSubst env in_id rhs',     out_id)
-  | otherwise   = (extendCSEnv env rhs' id_expr', zapped_id)
+  | not (isId in_id) = (extendCSSubst env in_id rhs',     out_id)
+  | noCSE in_id      = (env,                              out_id)
+  | use_subst        = (extendCSSubst env in_id rhs',     out_id)
+  | otherwise        = (extendCSEnv env rhs' id_expr', zapped_id)
   where
     id_expr'  = varToCoreExpr out_id
     zapped_id = zapIdUsageInfo out_id
@@ -381,7 +393,8 @@ addBinding env in_id out_id rhs'
                    _      -> False
 
 noCSE :: InId -> Bool
-noCSE id = not (isAlwaysActive (idInlineActivation id))
+noCSE id =  not (isAlwaysActive (idInlineActivation id)) &&
+            not (noUserInlineSpec (inlinePragmaSpec (idInlinePragma id)))
              -- See Note [CSE for INLINE and NOINLINE]
          || isAnyInlinePragma (idInlinePragma id)
              -- See Note [CSE for stable unfoldings]
@@ -440,8 +453,13 @@ tryForCSE env expr
     -- top of the replaced sub-expression. This is probably not too
     -- useful in practice, but upholds our semantics.
 
+-- | Runs CSE on a single expression.
+--
+-- This entry point is not used in the compiler itself, but is provided
+-- as a convenient entry point for users of the GHC API.
 cseOneExpr :: InExpr -> OutExpr
-cseOneExpr = cseExpr emptyCSEnv
+cseOneExpr e = cseExpr env e
+  where env = emptyCSEnv {cs_subst = mkEmptySubst (mkInScopeSet (exprFreeVars e)) }
 
 cseExpr :: CSEnv -> InExpr -> OutExpr
 cseExpr env (Type t)              = Type (substTy (csEnvSubst env) t)
@@ -450,7 +468,7 @@ cseExpr _   (Lit lit)             = Lit lit
 cseExpr env (Var v)               = lookupSubst env v
 cseExpr env (App f a)             = App (cseExpr env f) (tryForCSE env a)
 cseExpr env (Tick t e)            = Tick t (cseExpr env e)
-cseExpr env (Cast e co)           = Cast (cseExpr env e) (substCo (csEnvSubst env) co)
+cseExpr env (Cast e co)           = Cast (tryForCSE env e) (substCo (csEnvSubst env) co)
 cseExpr env (Lam b e)             = let (env', b') = addBinder env b
                                     in Lam b' (cseExpr env' e)
 cseExpr env (Let bind e)          = let (env', bind') = cseBind NotTopLevel env bind
@@ -526,9 +544,9 @@ to transform
    W y z   -> e2
 
 In the simplifier we use cheapEqExpr, because it is called a lot.
-But here in CSE we use the full eqExpr.  After all, two alterantives usually
+But here in CSE we use the full eqExpr.  After all, two alternatives usually
 differ near the root, so it probably isn't expensive to compare the full
-alternative.  It seems like the the same kind of thing that CSE is supposed
+alternative.  It seems like the same kind of thing that CSE is supposed
 to be doing, which is why I put it here.
 
 I acutally saw some examples in the wild, where some inlining made e1 too
@@ -572,7 +590,7 @@ extendCSEnv cse expr triv_expr
 extendCSRecEnv :: CSEnv -> OutId -> OutExpr -> OutExpr -> CSEnv
 -- See Note [CSE for recursive bindings]
 extendCSRecEnv cse bndr expr triv_expr
-  = cse { cs_rec_map = extendCoreMap (cs_map cse) (Lam bndr expr) triv_expr }
+  = cse { cs_rec_map = extendCoreMap (cs_rec_map cse) (Lam bndr expr) triv_expr }
 
 lookupCSRecEnv :: CSEnv -> OutId -> OutExpr -> Maybe OutExpr
 -- See Note [CSE for recursive bindings]
