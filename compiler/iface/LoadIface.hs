@@ -76,6 +76,7 @@ import Hooks
 import FieldLabel
 import RnModIface
 import UniqDSet
+import Plugins
 
 import Control.Monad
 import Control.Exception
@@ -510,7 +511,9 @@ loadInterface doc_str mod from
                                                    (length new_eps_insts)
                                                    (length new_eps_rules) }
 
-        ; return (Succeeded final_iface)
+        ; -- invoke plugins
+          res <- withPlugins dflags interfaceLoadAction final_iface
+        ; return (Succeeded res)
     }}}}
 
 -- | Returns @True@ if a 'ModIface' comes from an external package.
