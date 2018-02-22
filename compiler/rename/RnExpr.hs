@@ -1608,7 +1608,7 @@ mkStmtTreeOptimal stmts =
     -- find the best place to split the segment [lo..hi]
     split :: Int -> Int -> (ExprStmtTree, Cost)
     split lo hi
-      | hi == lo = (StmtTreeOne (stmt_arr ! lo), 1)
+      | hi == lo = (StmtTreeOne (stmt_arr ! lo), loCost)
       | otherwise = (StmtTreeBind before after, c1+c2)
         where
          -- As per the paper, for a sequence s1...sn, we want to find
@@ -1621,14 +1621,16 @@ mkStmtTreeOptimal stmts =
          -- in the case that these two have the same cost do we need
          -- to do the exhaustive search.
          --
+         loCost = 1 -- Find annotated weight using  (stmt_arr ! lo) :: (ExprLStmt GhcRn, FreeVars) 
+         hiCost = 1 --      - || -                  (stmt_arr ! hi) :: (ExprLStmt GhcRn, FreeVars)
          ((before,c1),(after,c2))
            | hi - lo == 1
-           = ((StmtTreeOne (stmt_arr ! lo), 1),
-              (StmtTreeOne (stmt_arr ! hi), 1))
+           = ((StmtTreeOne (stmt_arr ! lo), loCost),
+              (StmtTreeOne (stmt_arr ! hi), hiCost))
            | left_cost < right_cost
-           = ((left,left_cost), (StmtTreeOne (stmt_arr ! hi), 1))
+           = ((left,left_cost), (StmtTreeOne (stmt_arr ! hi), hiCost))
            | left_cost > right_cost
-           = ((StmtTreeOne (stmt_arr ! lo), 1), (right,right_cost))
+           = ((StmtTreeOne (stmt_arr ! lo), loCost), (right,right_cost))
            | otherwise = minimumBy (comparing cost) alternatives
            where
              (left, left_cost) = arr ! (lo,hi-1)
