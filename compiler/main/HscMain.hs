@@ -199,6 +199,7 @@ newHscEnv dflags = do
                   ,  hsc_FC           = fc_var
                   ,  hsc_type_env_var = Nothing
                   , hsc_iserv        = iserv_mvar
+                  , hsc_tcg_ann_from_parser = []
                   }
 
 -- -----------------------------------------------------------------------------

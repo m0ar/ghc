@@ -434,9 +434,10 @@ data HscEnv
                 -- the 'IfGblEnv'. See 'TcRnTypes.tcg_type_env_var' for
                 -- 'TcRnTypes.TcGblEnv'.  See also Note [hsc_type_env_var hack]
 
-        , hsc_iserv :: MVar (Maybe IServ)
+        , hsc_iserv :: MVar (Maybe IServ),
                 -- ^ interactive server process.  Created the first
                 -- time it is needed.
+        hsc_ann_from_parser :: [(AnnProvenance RdrName, HsExpr GhcPs)]
  }
 
 -- Note [hsc_type_env_var hack]
