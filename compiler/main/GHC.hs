@@ -297,7 +297,7 @@ import HscMain
 import GhcMake
 import DriverPipeline   ( compileOne' )
 import GhcMonad
-import TcRnMonad        ( finalSafeMode, fixSafeInstances )
+import TcRnMonad        ( finalSafeMode, fixSafeInstances, updTopEnv )
 import TcRnTypes
 import Packages
 import NameSet
@@ -893,6 +893,8 @@ parseModule ms = do
    hsc_env <- getSession
    let hsc_env_tmp = hsc_env { hsc_dflags = ms_hspp_opts ms }
    hpm <- liftIO $ hscParse hsc_env_tmp ms
+   -- Cool kids
+   setSession hsc_env { hsc_ann_from_parser = hpm_ann_from_parser hpm }
    return (ParsedModule ms (hpm_module hpm) (hpm_src_files hpm)
                            (hpm_annotations hpm))
                -- See Note [Api annotations] in ApiAnnotation.hs

@@ -333,13 +333,14 @@ tcRnImports hsc_env import_decls
                 -- Update the gbl env
         ; updGblEnv ( \ gbl ->
             gbl {
-              tcg_rdr_env      = tcg_rdr_env gbl `plusGlobalRdrEnv` rdr_env,
-              tcg_imports      = tcg_imports gbl `plusImportAvails` imports,
-              tcg_rn_imports   = rn_imports,
-              tcg_inst_env     = extendInstEnvList (tcg_inst_env gbl) home_insts,
-              tcg_fam_inst_env = extendFamInstEnvList (tcg_fam_inst_env gbl)
+              tcg_rdr_env         = tcg_rdr_env gbl `plusGlobalRdrEnv` rdr_env,
+              tcg_imports         = tcg_imports gbl `plusImportAvails` imports,
+              tcg_rn_imports      = rn_imports,
+              tcg_inst_env        = extendInstEnvList (tcg_inst_env gbl) home_insts,
+              tcg_fam_inst_env    = extendFamInstEnvList (tcg_fam_inst_env gbl)
                                                       home_fam_insts,
-              tcg_hpc          = hpc_info
+              tcg_hpc             = hpc_info,
+              tcg_ann_from_parser = hsc_ann_from_parser hsc_env
             }) $ do {
 
         ; traceRn "rn1" (ppr (imp_dep_mods imports))
@@ -1769,7 +1770,7 @@ runTcInteractive :: HscEnv -> TcRn a -> IO (Messages, Maybe a)
 -- Initialise the tcg_inst_env with instances from all home modules.
 -- This mimics the more selective call to hptInstances in tcRnImports
 runTcInteractive hsc_env thing_inside
-  = initTcInteractive hsc_env $ withTcPlugins hsc_env $
+  = initTcInteractive hsc_env $ withTcPlugins hsc_env $ 
     do { traceTc "setInteractiveContext" $
             vcat [ text "ic_tythings:" <+> vcat (map ppr (ic_tythings icxt))
                  , text "ic_insts:" <+> vcat (map (pprBndr LetBind . instanceDFunId) ic_insts)

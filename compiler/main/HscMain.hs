@@ -199,6 +199,7 @@ newHscEnv dflags = do
                   ,  hsc_FC           = fc_var
                   ,  hsc_type_env_var = Nothing
                   , hsc_iserv        = iserv_mvar
+                  , hsc_ann_from_parser = []
                   }
 
 -- -----------------------------------------------------------------------------
@@ -383,7 +384,8 @@ hscParse' mod_summary
                       hpm_annotations
                               = (Map.fromListWith (++) $ annotations pst,
                                  Map.fromList $ ((noSrcSpan,comment_q pst)
-                                                 :(annotations_comments pst)))
+                                                 :(annotations_comments pst))),
+                      hpm_ann_from_parser = []
                    }
 
             -- apply parse transformation of plugins

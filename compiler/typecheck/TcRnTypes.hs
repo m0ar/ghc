@@ -700,7 +700,9 @@ data TcGblEnv
         tcg_static_wc :: TcRef WantedConstraints,
           -- ^ Wanted constraints of static forms.
         -- See Note [Constraints in static forms].
-        tcg_complete_matches :: [CompleteMatch]
+        tcg_complete_matches :: [CompleteMatch],
+
+        tcg_ann_from_parser :: [(AnnProvenance RdrName, HsExpr GhcPs)]
     }
 
 -- NB: topModIdentity, not topModSemantic!
