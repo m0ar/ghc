@@ -893,7 +893,7 @@ parseModule ms = do
    hsc_env <- getSession
    let hsc_env_tmp = hsc_env { hsc_dflags = ms_hspp_opts ms }
    hpm <- liftIO $ hscParse hsc_env_tmp ms
-   -- Cool kids
+   -- Cool kids TODO: Add the plugin functions here 
    setSession hsc_env { hsc_ann_from_parser = hpm_ann_from_parser hpm }
    return (ParsedModule ms (hpm_module hpm) (hpm_src_files hpm)
                            (hpm_annotations hpm))
