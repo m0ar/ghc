@@ -434,10 +434,9 @@ data HscEnv
                 -- the 'IfGblEnv'. See 'TcRnTypes.tcg_type_env_var' for
                 -- 'TcRnTypes.TcGblEnv'.  See also Note [hsc_type_env_var hack]
 
-        , hsc_iserv :: MVar (Maybe IServ),
+        , hsc_iserv :: MVar (Maybe IServ)
                 -- ^ interactive server process.  Created the first
                 -- time it is needed.
-        hsc_ann_from_parser :: [(AnnProvenance RdrName, HsExpr GhcPs)]
  }
 
 -- Note [hsc_type_env_var hack]
@@ -3049,9 +3048,8 @@ data HsParsedModule = HsParsedModule {
        -- leaves behind.  These files and their timestamps are stored in
        -- the .hi file, so that we can force recompilation if any of
        -- them change (#3589)
-    hpm_annotations :: ApiAnns,
+    hpm_annotations :: ApiAnns
     -- See note [Api annotations] in ApiAnnotation.hs
-    hpm_ann_from_parser :: [(AnnProvenance RdrName, HsExpr GhcPs)]
   }
 
 {-

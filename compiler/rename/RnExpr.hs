@@ -14,6 +14,7 @@ free variables.
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE BangPatterns #-}
 
 module RnExpr (
         rnLExpr, rnExpr, rnStmts
@@ -60,6 +61,10 @@ import qualified GHC.LanguageExtensions as LangExt
 import Data.Ord
 import Data.Array
 import qualified Data.List.NonEmpty as NE
+
+import System.IO.Unsafe (unsafePerformIO)
+import System.IO (stdout, hPutStrLn)
+import HscTypes (HscEnv(..))
 
 {-
 ************************************************************************
@@ -1523,6 +1528,8 @@ rearrangeForApplicativeDo
 rearrangeForApplicativeDo _ [] = return ([], emptyNameSet)
 rearrangeForApplicativeDo _ [(one,_)] = return ([one], emptyNameSet)
 rearrangeForApplicativeDo ctxt stmts0 = do
+  hscAnns <- tcg_ann_from_parser <$> getGblEnv
+  let !() = unsafePerformIO . hPutStrLn stdout $ "AnnDecls: " ++ (show $ length hscAnns)
   optimal_ado <- goptM Opt_OptimalApplicativeDo
   let stmt_tree | optimal_ado = mkStmtTreeOptimal stmts
                 | otherwise = mkStmtTreeHeuristic stmts

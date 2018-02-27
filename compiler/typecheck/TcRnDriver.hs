@@ -13,6 +13,7 @@ https://ghc.haskell.org/trac/ghc/wiki/Commentary/Compiler/TypeChecker
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE BangPatterns #-}
 
 module TcRnDriver (
         tcRnStmt, tcRnExpr, TcRnExprMode(..), tcRnType,
@@ -134,6 +135,9 @@ import qualified Data.Set as S
 
 import Control.Monad
 
+import System.IO.Unsafe (unsafePerformIO)
+import System.IO (stdout, hPutStrLn)
+
 #include "HsVersions.h"
 
 {-
@@ -181,7 +185,33 @@ tcRnModule hsc_env hsc_src save_rn_syntax
       = (mAIN, srcLocSpan (srcSpanStart loc))
 
 
+type StrippedAnnD = (AnnProvenance RdrName, HsExpr GhcPs)
 
+-- | Traverses the top level declarations in the module, finds
+-- annotations and returns the annotated binding together with
+-- the payload expression.
+findAnnDecls :: HsModule GhcPs -> [StrippedAnnD]
+findAnnDecls hsModule = let lHsDecls = hsmodDecls hsModule in
+  stripAndFilterAnn lHsDecls
+
+-- | Strips location wrappers and collects content from ANN
+-- declarations from the top level declarations; we do not
+-- traverse deeper into the AST.
+--
+-- HsDecl has a constructor 'AnnD (AnnDecl name)', where
+-- 'AnnDecl name = HsAnnotation (AnnProvenance name)'
+--                              '(Located (HsExpr name))'
+stripAndFilterAnn :: [Located (HsDecl GhcPs)] -> [StrippedAnnD]
+stripAndFilterAnn = foldr unwrapAnnD []
+    where 
+        unwrapAnnD :: Located (HsDecl GhcPs) -> [StrippedAnnD]
+                    -> [StrippedAnnD]
+        unwrapAnnD (L _ (AnnD (HsAnnotation _ annProv lHsExpr)))
+                    annDecls = let L _ hsExpr = lHsExpr in
+                        (annProv, hsExpr):annDecls
+        unwrapAnnD _ annDecls = annDecls
+        -- ^ Not interested in anything else, so we skip any other
+        -- declaration
 
 tcRnModuleTcRnM :: HscEnv
                 -> HscSource
@@ -193,7 +223,7 @@ tcRnModuleTcRnM :: HscEnv
 tcRnModuleTcRnM hsc_env hsc_src
                 (HsParsedModule {
                    hpm_module =
-                      (L loc (HsModule maybe_mod export_ies
+                      (L loc hmod@(HsModule maybe_mod export_ies
                                        import_decls local_decls mod_deprec
                                        maybe_doc_hdr)),
                    hpm_src_files = src_files
@@ -208,7 +238,9 @@ tcRnModuleTcRnM hsc_env hsc_src
                 -- automatically considered to be loop breakers
         tcg_env <- getGblEnv ;
         boot_info <- tcHiBootIface hsc_src this_mod ;
-        setGblEnv (tcg_env { tcg_self_boot = boot_info }) $ do {
+        let { !() = unsafePerformIO.hPutStrLn stdout.show.length $ findAnnDecls hmod } ;
+        setGblEnv (tcg_env { tcg_self_boot = boot_info ,
+                             tcg_ann_from_parser = findAnnDecls hmod }) $ do {
 
         -- Deal with imports; first add implicit prelude
         implicit_prelude <- xoptM LangExt.ImplicitPrelude;
@@ -333,14 +365,13 @@ tcRnImports hsc_env import_decls
                 -- Update the gbl env
         ; updGblEnv ( \ gbl ->
             gbl {
-              tcg_rdr_env         = tcg_rdr_env gbl `plusGlobalRdrEnv` rdr_env,
-              tcg_imports         = tcg_imports gbl `plusImportAvails` imports,
-              tcg_rn_imports      = rn_imports,
-              tcg_inst_env        = extendInstEnvList (tcg_inst_env gbl) home_insts,
-              tcg_fam_inst_env    = extendFamInstEnvList (tcg_fam_inst_env gbl)
+              tcg_rdr_env      = tcg_rdr_env gbl `plusGlobalRdrEnv` rdr_env,
+              tcg_imports      = tcg_imports gbl `plusImportAvails` imports,
+              tcg_rn_imports   = rn_imports,
+              tcg_inst_env     = extendInstEnvList (tcg_inst_env gbl) home_insts,
+              tcg_fam_inst_env = extendFamInstEnvList (tcg_fam_inst_env gbl)
                                                       home_fam_insts,
-              tcg_hpc             = hpc_info,
-              tcg_ann_from_parser = hsc_ann_from_parser hsc_env
+              tcg_hpc          = hpc_info
             }) $ do {
 
         ; traceRn "rn1" (ppr (imp_dep_mods imports))
