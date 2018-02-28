@@ -363,7 +363,7 @@ tcRnImports hsc_env import_decls
         ; updateEps_ (\eps -> eps { eps_is_boot = dep_mods }) ;
 
                 -- Update the gbl env
-        ; updGblEnv ( \ gbl - >
+        ; updGblEnv ( \ gbl ->
             gbl {
               tcg_rdr_env      = tcg_rdr_env gbl `plusGlobalRdrEnv` rdr_env,
               tcg_imports      = tcg_imports gbl `plusImportAvails` imports,
