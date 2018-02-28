@@ -190,8 +190,8 @@ type StrippedAnnD = (AnnProvenance RdrName, HsExpr GhcPs)
 -- | Traverses the top level declarations in the module, finds
 -- annotations and returns the annotated binding together with
 -- the payload expression.
-findAnnDecls :: HsModule GhcPs -> [StrippedAnnD]
-findAnnDecls hsModule = let lHsDecls = hsmodDecls hsModule in
+slurpTopLvlAnn :: HsModule GhcPs -> [StrippedAnnD]
+slurpTopLvlAnn hsModule = let lHsDecls = hsmodDecls hsModule in
   stripAndFilterAnn lHsDecls
 
 -- | Strips location wrappers and collects content from ANN
@@ -238,9 +238,9 @@ tcRnModuleTcRnM hsc_env hsc_src
                 -- automatically considered to be loop breakers
         tcg_env <- getGblEnv ;
         boot_info <- tcHiBootIface hsc_src this_mod ;
-        let { !() = unsafePerformIO.hPutStrLn stdout.show.length $ findAnnDecls hmod } ;
+        let { !() = unsafePerformIO.hPutStrLn stdout.show.length $ slurpTopLvlAnn hmod } ;
         setGblEnv (tcg_env { tcg_self_boot = boot_info ,
-                             tcg_ann_from_parser = findAnnDecls hmod }) $ do {
+                             tcg_ann_from_parser = slurpTopLvlAnn hmod }) $ do {
 
         -- Deal with imports; first add implicit prelude
         implicit_prelude <- xoptM LangExt.ImplicitPrelude;
