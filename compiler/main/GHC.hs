@@ -909,8 +909,8 @@ typecheckModule pmod = do
        <- liftIO $ hscTypecheckRename hsc_env_tmp ms $
                       HsParsedModule { hpm_module = parsedSource pmod,
                                        hpm_src_files = pm_extra_src_files pmod,
-                                       hpm_annotations = pm_annotations pmod,
-                                       hpm_ann_from_parser = [] }
+                                       hpm_annotations = pm_annotations pmod
+                                       }
  details <- liftIO $ makeSimpleDetails hsc_env_tmp tc_gbl_env
  safe    <- liftIO $ finalSafeMode (ms_hspp_opts ms) tc_gbl_env
 
