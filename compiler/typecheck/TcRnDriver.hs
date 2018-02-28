@@ -121,7 +121,7 @@ import Class
 import BasicTypes hiding( SuccessFlag(..) )
 import CoAxiom
 import Annotations
-import Data.List ( sortBy, sort )
+import Data.List ( sortBy, sort, foldl' )
 import Data.Ord
 import FastString
 import Maybes
@@ -202,14 +202,15 @@ slurpTopLvlAnn hsModule = let lHsDecls = hsmodDecls hsModule in
 -- 'AnnDecl name = HsAnnotation (AnnProvenance name)'
 --                              '(Located (HsExpr name))'
 stripAndFilterAnn :: [Located (HsDecl GhcPs)] -> [StrippedAnnD]
-stripAndFilterAnn = foldr unwrapAnnD []
+stripAndFilterAnn = foldl' unwrapAnnD []
     where 
-        unwrapAnnD :: Located (HsDecl GhcPs) -> [StrippedAnnD]
+        unwrapAnnD :: [StrippedAnnD] -> Located (HsDecl GhcPs)
                     -> [StrippedAnnD]
-        unwrapAnnD (L _ (AnnD (HsAnnotation _ annProv lHsExpr)))
-                    annDecls = let L _ hsExpr = lHsExpr in
-                        (annProv, hsExpr):annDecls
-        unwrapAnnD _ annDecls = annDecls
+        unwrapAnnD annDecls
+                   (L _ (AnnD (HsAnnotation _ annProv lHsExpr)))
+                   = let L _ hsExpr = lHsExpr in
+                      (annProv, hsExpr):annDecls
+        unwrapAnnD annDecls _ = annDecls
         -- ^ Not interested in anything else, so we skip any other
         -- declaration
 
