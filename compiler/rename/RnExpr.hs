@@ -1582,20 +1582,20 @@ mkStmtTreeHeuristic stmts =
   split stmts =
     StmtTreeBind (mkStmtTreeHeuristic before) (mkStmtTreeHeuristic after)
     where (before, after) = splitSegment stmts
- 
+
 -- | Turn a sequence of statements into an ExprStmtTree optimally,
 -- using dynamic programming.  /O(n^3)/
-mkStmtTreeOptimal :: [(ExprLStmt GhcRn, FreeVars)] -> 
-                     [(AnnProvenance RdrName, HsExpr GhcPs)] -> 
+mkStmtTreeOptimal :: [(ExprLStmt GhcRn, FreeVars)] ->
+                     [(AnnProvenance RdrName, HsExpr GhcPs)] ->
                      ExprStmtTree
 mkStmtTreeOptimal stmts hscAnns =
   ASSERT(not (null stmts)) -- the empty case is handled by the caller;
                            -- we don't support empty StmtTrees.
   fst (arr ! (0,n))
   where
-    -- Map from OccName to Weights (HsExpr GhcPs)  
+    -- Map from OccName to Weights (HsExpr GhcPs)
     weightMap = Map.fromList $ foldl' deProv [] hscAnns
-      -- TODO: Figure out what AnnProvenance are for. Maybe move this formating to earlier. 
+      -- TODO: Figure out what AnnProvenance are for. Maybe move this formating to earlier.
       where deProv = (\ list (name, weight) -> addMaybe (rdrNameOcc <$> annProvenanceName_maybe name, weight) list )
             addMaybe (Just name, weight) list = (name, weight) : list
             addMaybe (Nothing, _) list = list
@@ -1638,15 +1638,15 @@ mkStmtTreeOptimal stmts hscAnns =
          -- in the case that these two have the same cost do we need
          -- to do the exhaustive search.
          --
-         
+
          -- Annotated weights:
          getCurrentOccName :: Int -> Maybe OccName
          getCurrentOccName i = nameOccName <$> getStmNameMaybe (stmt_arr ! i)
             where
               getStmNameMaybe :: (ExprLStmt GhcRn, FreeVars) -> Maybe Name
-              getStmNameMaybe (L _ (stmtLR), freeVars_) = case stmtLR of 
+              getStmNameMaybe (L _ (stmtLR), freeVars_) = case stmtLR of
                   -- stmtLR :: StmtLR GhcRn GhcRn (LHsExpr GhcRn)
-                  -- data StmtLR is defined in HsExpr.hs 
+                  -- data StmtLR is defined in HsExpr.hs
                   (BodyStmt (L _ expr) _ _ _) -> (getExpNameMaybe expr)
                   (BindStmt _ (L _ expr) _ _ _) -> (getExpNameMaybe expr)
                   _ -> Nothing
@@ -1655,28 +1655,28 @@ mkStmtTreeOptimal stmts hscAnns =
               getExpNameMaybe (HsApp (L _ expr) _) = getExpNameMaybe expr
               getExpNameMaybe (HsVar (L _ name) ) = Just name
               getExpNameMaybe _ = Nothing
-         
+
          getCurrentWeight :: Int -> Maybe Integer
          getCurrentWeight i = join $ getWeightFromExpr <$> getWeightExpr i
-            where 
+            where
               getWeightExpr :: Int -> Maybe (HsExpr GhcPs)
-              getWeightExpr i = join $ (\a -> Map.lookup a weightMap) <$> getCurrentOccName i 
+              getWeightExpr i = join $ (flip Map.lookup weightMap) <$> getCurrentOccName i
               getWeightFromExpr :: HsExpr GhcPs -> Maybe Integer
-              getWeightFromExpr = snd . ss  
+              getWeightFromExpr = snd . ss
 
          !() = unsafePerformIO . hPutStrLn stdout $ "AdoStm: "
-                    ++ "(" ++ (show lo) ++ " / " ++ (show hi)++ ") :" 
+                    ++ "(" ++ (show lo) ++ " / " ++ (show hi)++ ") :"
                     ++ (showJ $ getCurrentOccName lo) ++ " / "
-                    ++ (showJ $ getCurrentOccName hi) 
+                    ++ (showJ $ getCurrentOccName hi)
             where showJ (Just id) = showSDocUnsafe $ ppr id
                   showJ Nothing = "Other"
          !() = ( unsafePerformIO . hPutStrLn stdout ) $ "Low (" ++ (show lo) ++ ") :" ++ ( show $ getCurrentWeight lo )
          !() = ( unsafePerformIO . hPutStrLn stdout ) $ "High (" ++ (show hi) ++ ") :" ++ ( show $ getCurrentWeight hi )
-        
-         loCost = case getCurrentWeight lo of 
-           Just i -> fromInteger i 
-           Nothing -> 1 
-         hiCost = case getCurrentWeight hi of 
+
+         loCost = case getCurrentWeight lo of
+           Just i -> fromInteger i
+           Nothing -> 1
+         hiCost = case getCurrentWeight hi of
            Just i -> fromInteger i
            Nothing -> 1
          ((before,c1),(after,c2))
@@ -1698,45 +1698,45 @@ mkStmtTreeOptimal stmts hscAnns =
 -- TODO: defeat the ss. Don't look at the ss. Plz
 ss :: HsExpr GhcPs -> (String, Maybe Integer)
 ss (HsVar (L _ (name :: IdP GhcPs)))       = ("1:" ++ (show $ isExact name), Nothing) -- TODO make sure its weight
-ss (HsIPVar {})             = ("2", Nothing)  
-ss (HsOverLit overLit)      = case ol_val overLit of 
+ss (HsIPVar {})             = ("2", Nothing)
+ss (HsOverLit overLit)      = case ol_val overLit of
                                   (HsIntegral i) -> ("3", Just (il_value i))
-                                  _ -> ("3:NOVALUE",Nothing)     
+                                  _ -> ("3:NOVALUE",Nothing)
 ss (HsLit {})               = ("4",Nothing)
 ss (HsLam {})               = ("6", Nothing)
-ss (HsApp (L _ e1) (L _ e2))= let (s, i) = (ss e2) in ("7:" ++ s, i) 
+ss (HsApp (L _ e1) (L _ e2))= let (s, i) = (ss e2) in ("7:" ++ s, i)
 ss (OpApp {})               = ("8", Nothing)
 ss (NegApp {})              = ("9", Nothing)
-ss (HsPar (L _ e))          = let (s, i) = (ss e) in ("10:" ++ s, i) 
-ss (SectionL {})            = ("11", Nothing)  
-ss (SectionR {})            = ("12", Nothing)  
-ss (ExplicitTuple {})       = ("13", Nothing)        
+ss (HsPar (L _ e))          = let (s, i) = (ss e) in ("10:" ++ s, i)
+ss (SectionL {})            = ("11", Nothing)
+ss (SectionR {})            = ("12", Nothing)
+ss (ExplicitTuple {})       = ("13", Nothing)
 ss (HsCase {})              = ("14", Nothing)
 ss (HsIf {})                = ("15", Nothing)
 ss (HsLet {})               = ("16", Nothing)
 ss (HsDo {})                = ("17", Nothing)
-ss (ExplicitList {})        = ("18", Nothing)      
-ss (ExplicitPArr {})        = ("19", Nothing)      
-ss (RecordCon {})           = ("20", Nothing)    
-ss (RecordUpd {})           = ("21", Nothing)    
-ss (ExprWithTySig {})       = ("22", Nothing)        
-ss (ExprWithTySigOut {})    = ("23", Nothing)          
-ss (ArithSeq {})            = ("24", Nothing)  
-ss (PArrSeq {})             = ("25", Nothing)  
+ss (ExplicitList {})        = ("18", Nothing)
+ss (ExplicitPArr {})        = ("19", Nothing)
+ss (RecordCon {})           = ("20", Nothing)
+ss (RecordUpd {})           = ("21", Nothing)
+ss (ExprWithTySig {})       = ("22", Nothing)
+ss (ExprWithTySigOut {})    = ("23", Nothing)
+ss (ArithSeq {})            = ("24", Nothing)
+ss (PArrSeq {})             = ("25", Nothing)
 ss (HsSCC {})               = ("26", Nothing)
-ss (HsCoreAnn {})           = ("27", Nothing)    
-ss (HsBracket {})           = ("28", Nothing)         
-ss (HsSpliceE {})           = ("30", Nothing)       
+ss (HsCoreAnn {})           = ("27", Nothing)
+ss (HsBracket {})           = ("28", Nothing)
+ss (HsSpliceE {})           = ("30", Nothing)
 ss (HsProc {})              = ("32", Nothing)
-ss (HsArrApp {})            = ("33", Nothing)  
-ss (HsArrForm {})           = ("34", Nothing)    
+ss (HsArrApp {})            = ("33", Nothing)
+ss (HsArrForm {})           = ("34", Nothing)
 ss (HsTick {})              = ("35", Nothing)
-ss (HsBinTick {})           = ("36", Nothing)    
-ss (HsTickPragma {})        = ("37", Nothing)      
-ss (EWildPat {})            = ("38", Nothing)  
+ss (HsBinTick {})           = ("36", Nothing)
+ss (HsTickPragma {})        = ("37", Nothing)
+ss (EWildPat {})            = ("38", Nothing)
 ss (EAsPat {})              = ("39", Nothing)
-ss (EViewPat {})            = ("40", Nothing)  
-ss (ELazyPat {})            = ("41", Nothing)  
+ss (EViewPat {})            = ("40", Nothing)
+ss (ELazyPat {})            = ("41", Nothing)
 ss (HsWrap {})              = ("43", Nothing)
 
 -- | Turn the ExprStmtTree back into a sequence of statements, using
