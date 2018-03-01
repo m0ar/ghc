@@ -1647,20 +1647,20 @@ mkStmtTreeOptimal stmts hscAnns =
               getStmNameMaybe (L _ (stmtLR), freeVars_) = case stmtLR of
                   -- stmtLR :: StmtLR GhcRn GhcRn (LHsExpr GhcRn)
                   -- data StmtLR is defined in HsExpr.hs
-                  (BodyStmt (L _ expr) _ _ _) -> (getExpNameMaybe expr)
-                  (BindStmt _ (L _ expr) _ _ _) -> (getExpNameMaybe expr)
+                  (BodyStmt (L _ expr) _ _ _)   -> getExpNameMaybe expr
+                  (BindStmt _ (L _ expr) _ _ _) -> getExpNameMaybe expr
                   _ -> Nothing
               getExpNameMaybe :: HsExpr GhcRn -> Maybe Name
-              -- data HsExpr is defined in HsExpr.hs
               getExpNameMaybe (HsApp (L _ expr) _) = getExpNameMaybe expr
-              getExpNameMaybe (HsVar (L _ name) ) = Just name
+              getExpNameMaybe (HsVar (L _ name))   = Just name
               getExpNameMaybe _ = Nothing
 
          getCurrentWeight :: Int -> Maybe Integer
          getCurrentWeight i = join $ getWeightFromExpr <$> getWeightExpr i
             where
               getWeightExpr :: Int -> Maybe (HsExpr GhcPs)
-              getWeightExpr i = join $ (flip Map.lookup weightMap) <$> getCurrentOccName i
+              getWeightExpr i = join $ flip Map.lookup weightMap <$> getCurrentOccName i
+
               getWeightFromExpr :: HsExpr GhcPs -> Maybe Integer
               getWeightFromExpr = snd . ss
 
@@ -1668,17 +1668,12 @@ mkStmtTreeOptimal stmts hscAnns =
                     ++ "(" ++ (show lo) ++ " / " ++ (show hi)++ ") :"
                     ++ (showJ $ getCurrentOccName lo) ++ " / "
                     ++ (showJ $ getCurrentOccName hi)
-            where showJ (Just id) = showSDocUnsafe $ ppr id
-                  showJ Nothing = "Other"
+            where showJ = maybe "Other" (showSDocUnsafe . ppr)
          !() = ( unsafePerformIO . hPutStrLn stdout ) $ "Low (" ++ (show lo) ++ ") :" ++ ( show $ getCurrentWeight lo )
          !() = ( unsafePerformIO . hPutStrLn stdout ) $ "High (" ++ (show hi) ++ ") :" ++ ( show $ getCurrentWeight hi )
 
-         loCost = case getCurrentWeight lo of
-           Just i -> fromInteger i
-           Nothing -> 1
-         hiCost = case getCurrentWeight hi of
-           Just i -> fromInteger i
-           Nothing -> 1
+         loCost = maybe 1 fromInteger $ getCurrentWeight lo
+         hiCost = maybe 1 fromInteger $ getCurrentWeight hi
          ((before,c1),(after,c2))
            | hi - lo == 1
            = ((StmtTreeOne (stmt_arr ! lo), loCost),
