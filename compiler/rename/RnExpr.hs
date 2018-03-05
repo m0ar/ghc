@@ -66,7 +66,7 @@ import System.IO.Unsafe (unsafePerformIO)
 import System.IO (stdout, hPutStrLn)
 import qualified Data.Map as Map -- For mapping RdrNames to weights in ApplicativeDo
 import Data.Foldable (foldl')
-import Weights
+--import Weights
 
 {-
 ************************************************************************
@@ -1686,7 +1686,7 @@ mkStmtTreeOptimal stmts hscAnns =
               isValidWeightRdrName :: RdrName -> Bool
               isValidWeightRdrName rdrName = rdrName == weightRdrName
                 where weightRdrName :: RdrName
-                      weightRdrName = mkUnqual dataName (fsLit $ className Weight)
+                      weightRdrName = mkUnqual dataName (fsLit $ "Weight")
 
          !() = unsafePrint $ "AdoStm: "
                     ++ "(" ++ (show lo) ++ " / " ++ (show hi)++ ") :: "
