@@ -1617,13 +1617,15 @@ mkStmtTreeOptimal stmts hscAnns =
     tree lo hi
       | hi == lo = (StmtTreeOne (stmt_arr ! lo), 1)
       | otherwise =
-         case segments [ stmt_arr ! i | i <- [lo..hi] ] of
+         let stms = [ stmt_arr ! i | i <- [lo..hi] ] in
+         case segments stms of
            [] -> panic "mkStmtTree"
            [_one] -> split lo hi
-           segs -> (StmtTreeApplicative trees, maximum costs)
+           segs -> maximumBy compare.snd [splitWithoutSegments , (StmtTreeApplicative trees, maximum costs)]
              where
                bounds = scanl (\(_,hi) a -> (hi+1, hi + length a)) (0,lo-1) segs
                (trees,costs) = unzip (map (uncurry split) (tail bounds))
+               splitWithoutSegments = split lo hi -- TODO better names
 
     -- find the best place to split the segment [lo..hi]
     split :: Int -> Int -> (ExprStmtTree, Cost)
