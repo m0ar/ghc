@@ -1621,11 +1621,13 @@ mkStmtTreeOptimal stmts hscAnns =
          case segments stms of
            [] -> panic "mkStmtTree"
            [_one] -> split lo hi
-           segs -> minimumBy (\(_,x) (_,y) -> compare x y) [splitWithoutSegments , (StmtTreeApplicative trees, maximum costs)]
+           segs -> if costBefore < maximum costs
+                   then splitBeforeSegment
+                   else (StmtTreeApplicative trees, maximum costs)
              where
                bounds = scanl (\(_,hi) a -> (hi+1, hi + length a)) (0,lo-1) segs
                (trees,costs) = unzip (map (uncurry split) (tail bounds))
-               splitWithoutSegments = split lo hi -- TODO better names
+               splitBeforeSegment@(_,costBefore) = split lo hi
 
     -- find the best place to split the segment [lo..hi]
     split :: Int -> Int -> (ExprStmtTree, Cost)
