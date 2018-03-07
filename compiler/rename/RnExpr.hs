@@ -1621,7 +1621,7 @@ mkStmtTreeOptimal stmts hscAnns =
          case segments stms of
            [] -> panic "mkStmtTree"
            [_one] -> split lo hi
-           segs -> maximumBy compare.snd [splitWithoutSegments , (StmtTreeApplicative trees, maximum costs)]
+           segs -> minimumBy (\(_,x) (_,y) -> compare x y) [splitWithoutSegments , (StmtTreeApplicative trees, maximum costs)]
              where
                bounds = scanl (\(_,hi) a -> (hi+1, hi + length a)) (0,lo-1) segs
                (trees,costs) = unzip (map (uncurry split) (tail bounds))
