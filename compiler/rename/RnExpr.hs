@@ -65,7 +65,6 @@ import qualified Data.List.NonEmpty as NE
 import System.IO.Unsafe (unsafePerformIO)
 import System.IO (stdout, hPutStrLn)
 import qualified Data.Map as Map -- For mapping RdrNames to weights in ApplicativeDo
-import Data.Foldable (foldl')
 --import Weights
 
 {-
@@ -1589,20 +1588,14 @@ mkStmtTreeHeuristic stmts =
 -- | Turn a sequence of statements into an ExprStmtTree optimally,
 -- using dynamic programming.  /O(n^3)/
 mkStmtTreeOptimal :: [(ExprLStmt GhcRn, FreeVars)] ->
-                     [(AnnProvenance RdrName, HsExpr GhcPs)] ->
+                     Map.Map OccName (HsExpr GhcPs) ->
                      ExprStmtTree
-mkStmtTreeOptimal stmts hscAnns =
+mkStmtTreeOptimal stmts annMap =
   ASSERT(not (null stmts)) -- the empty case is handled by the caller;
                            -- we don't support empty StmtTrees.
   fst (arr ! (0,n))
   where
-    -- Map from OccName to Weights (HsExpr GhcPs)
-    weightMap = Map.fromList $ foldl' deProv [] hscAnns
-      -- TODO: Figure out what AnnProvenance are for. Maybe move this formating to earlier.
-      where deProv = (\ list (name, weight) -> addMaybe (rdrNameOcc <$> annProvenanceName_maybe name, weight) list )
-            addMaybe (Just name, weight) list = (name, weight) : list
-            addMaybe (Nothing, _) list = list
-    !() = unsafePrint $ "weightMap size:"  ++ (show $ Map.size weightMap)
+    !() = unsafePrint $ "annMap size:"  ++ (show $ Map.size annMap)
     n = length stmts - 1
     stmt_arr = listArray (0,n) stmts
 
@@ -1669,7 +1662,7 @@ mkStmtTreeOptimal stmts hscAnns =
          getCurrentWeight i = join $ getWeightFromWeightExpr <$> getWeightExpr i
             where
               getWeightExpr :: Int -> Maybe (HsExpr GhcPs)
-              getWeightExpr i = join $ (flip Map.lookup weightMap . nameOccName) <$> getCurrentName i
+              getWeightExpr i = join $ (flip Map.lookup annMap . nameOccName) <$> getCurrentName i
 
               getWeightFromWeightExpr :: HsExpr GhcPs -> Maybe Integer
               getWeightFromWeightExpr (HsPar (L _ exp)) = getWeightFromWeightExpr exp -- Remove parentheses

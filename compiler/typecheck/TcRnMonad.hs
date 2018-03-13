@@ -303,7 +303,7 @@ initTc hsc_env hsc_src keep_rn_syntax mod loc do_this
                 tcg_top_loc        = loc,
                 tcg_static_wc      = static_wc_var,
                 tcg_complete_matches = [],
-                tcg_ann_from_parser = []
+                tcg_ann_from_parser = Map.empty
              } ;
         } ;
 

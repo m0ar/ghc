@@ -702,8 +702,10 @@ data TcGblEnv
         -- See Note [Constraints in static forms].
         tcg_complete_matches :: [CompleteMatch],
 
-        tcg_ann_from_parser :: [(AnnProvenance RdrName, HsExpr GhcPs)]
+        tcg_ann_from_parser :: AnnMap
     }
+
+type AnnMap = Map OccName (HsExpr GhcPs)
 
 -- NB: topModIdentity, not topModSemantic!
 -- Definition sites of orphan identities will be identity modules, not semantic

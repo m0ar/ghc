@@ -132,6 +132,7 @@ import qualified GHC.LanguageExtensions as LangExt
 import Data.Data ( Data )
 import HsDumpAst
 import qualified Data.Set as S
+import qualified Data.Map.Lazy as M (fromList, Map )
 
 import Control.Monad
 
@@ -186,13 +187,14 @@ tcRnModule hsc_env hsc_src save_rn_syntax
 
 
 type StrippedAnnD = (AnnProvenance RdrName, HsExpr GhcPs)
+type AnnMap = M.Map OccName (HsExpr GhcPs)
 
 -- | Traverses the top level declarations in the module, finds
 -- annotations and returns the annotated binding together with
 -- the payload expression.
-slurpTopLvlAnn :: HsModule GhcPs -> [StrippedAnnD]
+slurpTopLvlAnn :: HsModule GhcPs -> AnnMap
 slurpTopLvlAnn hsModule = let lHsDecls = hsmodDecls hsModule in
-  stripAndFilterAnn lHsDecls
+  makeAnnMap $ stripAndFilterAnn lHsDecls
 
 -- | Strips location wrappers and collects content from ANN
 -- declarations from the top level declarations; we do not
@@ -201,9 +203,10 @@ slurpTopLvlAnn hsModule = let lHsDecls = hsmodDecls hsModule in
 -- HsDecl has a constructor 'AnnD (AnnDecl name)', where
 -- 'AnnDecl name = HsAnnotation (AnnProvenance name)'
 --                              '(Located (HsExpr name))'
-stripAndFilterAnn :: [Located (HsDecl GhcPs)] -> [StrippedAnnD]
+stripAndFilterAnn :: [Located (HsDecl GhcPs)]
+                  -> [StrippedAnnD]
 stripAndFilterAnn = foldl' unwrapAnnD []
-    where 
+    where
         unwrapAnnD :: [StrippedAnnD] -> Located (HsDecl GhcPs)
                     -> [StrippedAnnD]
         unwrapAnnD annDecls
@@ -213,6 +216,19 @@ stripAndFilterAnn = foldl' unwrapAnnD []
         unwrapAnnD annDecls _ = annDecls
         -- ^ Not interested in anything else, so we skip any other
         -- declaration
+
+-- | Creates a map from 'OccName' to ann payload expressions,
+-- used for weight information in ApplicativeDo
+makeAnnMap :: [StrippedAnnD] -> AnnMap
+makeAnnMap = M.fromList . foldl' deProvenance []
+  where deProvenance :: [(OccName, a)]
+                     -> (AnnProvenance RdrName, a)
+                     -> [(OccName, a)]
+        deProvenance list (name, payload) = addMaybe
+            (rdrNameOcc <$> annProvenanceName_maybe name, payload)
+            list
+        addMaybe (Just name, payload) list = (name, payload) : list
+        addMaybe (Nothing, _) list = list
 
 tcRnModuleTcRnM :: HscEnv
                 -> HscSource
