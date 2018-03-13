@@ -1622,9 +1622,11 @@ mkStmtTreeOptimal stmts hscAnns =
            [] -> panic "mkStmtTree"
            [_one] -> split lo hi
            segs -> let costAfter = maximum costs in
-                   if costBefore < costAfter
-                   then splitBeforeSegmentation
-                   else (StmtTreeApplicative trees, costAfter)
+                   let !() = unsafePrint $ "CostBefore:" ++ (show costBefore) in
+                   let !() = unsafePrint $ "CostAfter:" ++ (show costAfter) in
+                   if costBefore > costAfter
+                   then (StmtTreeApplicative trees, maximum costs)
+                   else splitBeforeSegmentation
              where
                bounds = scanl (\(_,hi) a -> (hi+1, hi + length a)) (0,lo-1) segs
                (trees,costs) = unzip (map (uncurry split) (tail bounds))
@@ -1648,8 +1650,8 @@ mkStmtTreeOptimal stmts hscAnns =
          --
 
          -- Annotated weights:
-         getCurrentOccName :: Int -> Maybe OccName
-         getCurrentOccName i = nameOccName <$> getStmNameMaybe (stmt_arr ! i)
+         getCurrentName :: Int -> Maybe Name
+         getCurrentName stmIndex = getStmNameMaybe (stmt_arr ! stmIndex)
             where
               getStmNameMaybe :: (ExprLStmt GhcRn, FreeVars) -> Maybe Name
               getStmNameMaybe (L _ (stmtLR), _) = case stmtLR of
@@ -1664,22 +1666,22 @@ mkStmtTreeOptimal stmts hscAnns =
               getExpNameMaybe _ = Nothing
 
          getCurrentWeight :: Int -> Maybe Integer
-         getCurrentWeight i = join $ getWeightFromExpr <$> getWeightExpr i
+         getCurrentWeight i = join $ getWeightFromWeightExpr <$> getWeightExpr i
             where
               getWeightExpr :: Int -> Maybe (HsExpr GhcPs)
-              getWeightExpr i = join $ flip Map.lookup weightMap <$> getCurrentOccName i
+              getWeightExpr i = join $ (flip Map.lookup weightMap . nameOccName) <$> getCurrentName i
 
-              getWeightFromExpr :: HsExpr GhcPs -> Maybe Integer
-              getWeightFromExpr (HsPar (L _ exp)) = getWeightFromExpr exp -- Remove parentheses
-              getWeightFromExpr (HsApp (L _ varExp) (L _ valExp))
+              getWeightFromWeightExpr :: HsExpr GhcPs -> Maybe Integer
+              getWeightFromWeightExpr (HsPar (L _ exp)) = getWeightFromWeightExpr exp -- Remove parentheses
+              getWeightFromWeightExpr (HsApp (L _ varExp) (L _ valExp))
                 | maybe False isValidWeightRdrName $ extractRdrName varExp
-                              = getWeightFromExpr valExp -- Get the integer value
+                              = getWeightFromWeightExpr valExp -- Get the integer value
                 | otherwise   = Nothing
-              getWeightFromExpr (HsOverLit overLit) =
+              getWeightFromWeightExpr (HsOverLit overLit) =
                               case ol_val overLit of -- Convert to integer
                               HsIntegral i -> Just $ il_value i
                               _            -> Nothing
-              getWeightFromExpr _  = Nothing
+              getWeightFromWeightExpr _  = Nothing
 
               extractRdrName :: HsExpr GhcPs -> Maybe RdrName
               extractRdrName (HsPar (L _ e))    = extractRdrName e
@@ -1695,8 +1697,8 @@ mkStmtTreeOptimal stmts hscAnns =
 
          !() = unsafePrint $ "AdoStm: "
                     ++ "(" ++ (show lo) ++ " / " ++ (show hi)++ ") :: "
-                    ++ (showJ $ getCurrentOccName lo) ++ " / "
-                    ++ (showJ $ getCurrentOccName hi) ++ " :: "
+                    ++ (showJ $ getCurrentName lo) ++ " / "
+                    ++ (showJ $ getCurrentName hi) ++ " :: "
                     ++ (show $ getCurrentWeight lo) ++ " / "
                     ++ (show $ getCurrentWeight hi)
             where showJ = maybe "Other" (showSDocUnsafe . ppr)
