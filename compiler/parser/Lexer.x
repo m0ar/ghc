@@ -673,6 +673,7 @@ data Token
   | IToverlapping_prag  SourceText  -- instance overlap mode
   | IToverlaps_prag     SourceText  -- instance overlap mode
   | ITincoherent_prag   SourceText  -- instance overlap mode
+  | ITweight_prag       SourceText Int
   | ITctype             SourceText
 
   | ITdotdot                    -- reserved symbols
@@ -2900,7 +2901,9 @@ twoWordPrags = Map.fromList([
      ("specialize notinline",
          strtoken (\s -> (ITspec_inline_prag (SourceText s) False))),
      ("vectorize scalar",
-         strtoken (\s -> ITvect_scalar_prag (SourceText s)))])
+         strtoken (\s -> ITvect_scalar_prag (SourceText s))),
+     ("weight int",
+         strtoken (\s -> ITweight_prag (SourceText s)))])
 
 dispatch_pragmas :: Map String Action -> Action
 dispatch_pragmas prags span buf len = case Map.lookup (clean_pragma (lexemeToString buf len)) prags of
