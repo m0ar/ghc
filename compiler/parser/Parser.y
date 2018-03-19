@@ -493,6 +493,7 @@ are the most common patterns, rewritten as regular expressions for clarity:
  '{-# OVERLAPS'           { L _ (IToverlaps_prag _) }
  '{-# INCOHERENT'         { L _ (ITincoherent_prag _) }
  '{-# COMPLETE'           { L _ (ITcomplete_prag _)   }
+ '{-# WEIGHT'             { L _ (ITweight_prag _) }
  '#-}'                    { L _ ITclose_prag }
 
  '..'           { L _ ITdotdot }                        -- reserved symbols
@@ -2981,11 +2982,18 @@ stmt  :: { LStmt GhcPs (LHsExpr GhcPs) }
                                                (mj AnnRec $1:(fst $ unLoc $2)) }
 
 qual  :: { LStmt GhcPs (LHsExpr GhcPs) }
-    : bindpat '<-' exp                  {% ams (sLL $1 $> $ mkBindStmt $1 $3)
+    : bindpat '<-' exp maybeweight      {% ams (sLL $1 $> $ mkBindStmt $1 $3 $4)
                                                [mu AnnLarrow $2] }
-    | exp                               { sL1 $1 $ mkBodyStmt $1 }
+    | exp maybeweight                   { sL1 $1 $ mkBodyStmt $1 $2}
     | 'let' binds                       {% ams (sLL $1 $>$ LetStmt (snd $ unLoc $2))
                                                (mj AnnLet $1:(fst $ unLoc $2)) }
+
+-----------------------------------------------------------------------------
+-- Optional weighting of do statements for ApplicativeDo
+maybeweight :: Maybe Weight
+    : {- empty -}                       { Nothing }
+    | { '{-# WEIGHT' int '#-}' }        { Just (Weight $1) }
+
 
 -----------------------------------------------------------------------------
 -- Record Field Update/Construction
@@ -3504,6 +3512,7 @@ getINLINE       (L _ (ITinline_prag _ inl conl)) = (inl,conl)
 getSPEC_INLINE  (L _ (ITspec_inline_prag _ True))  = (Inline,  FunLike)
 getSPEC_INLINE  (L _ (ITspec_inline_prag _ False)) = (NoInline,FunLike)
 getCOMPLETE_PRAGs (L _ (ITcomplete_prag x)) = x
+getWEIGHT       (L _ (ITweight_prag _ w)) = w
 
 getDOCNEXT (L _ (ITdocCommentNext x)) = x
 getDOCPREV (L _ (ITdocCommentPrev x)) = x
@@ -3541,6 +3550,7 @@ getOVERLAPPING_PRAGs  (L _ (IToverlapping_prag  src)) = src
 getOVERLAPS_PRAGs     (L _ (IToverlaps_prag     src)) = src
 getINCOHERENT_PRAGs   (L _ (ITincoherent_prag   src)) = src
 getCTYPEs             (L _ (ITctype             src)) = src
+getWEIGHT_PRAGs      (L _ (ITweight_prag       src)) = src
 
 getStringLiteral l = StringLiteral (getSTRINGs l) (getSTRING l)
 
