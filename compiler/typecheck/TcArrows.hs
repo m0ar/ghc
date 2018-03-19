@@ -354,16 +354,16 @@ tcArrDoStmt env _ (LastStmt rhs noret _) res_ty thing_inside
         ; thing <- thing_inside (panic "tcArrDoStmt")
         ; return (LastStmt rhs' noret noSyntaxExpr, thing) }
 
-tcArrDoStmt env _ (BodyStmt rhs _ _ _) res_ty thing_inside
+tcArrDoStmt env _ (BodyStmt rhs _ _ _ mWeight) res_ty thing_inside
   = do  { (rhs', elt_ty) <- tc_arr_rhs env rhs
         ; thing          <- thing_inside res_ty
-        ; return (BodyStmt rhs' noSyntaxExpr noSyntaxExpr elt_ty, thing) }
+        ; return (BodyStmt rhs' noSyntaxExpr noSyntaxExpr elt_ty mWeight, thing) }
 
-tcArrDoStmt env ctxt (BindStmt pat rhs _ _ _) res_ty thing_inside
+tcArrDoStmt env ctxt (BindStmt pat rhs _ _ _ mWeight) res_ty thing_inside
   = do  { (rhs', pat_ty) <- tc_arr_rhs env rhs
         ; (pat', thing)  <- tcPat (StmtCtxt ctxt) pat (mkCheckExpType pat_ty) $
                             thing_inside res_ty
-        ; return (mkTcBindStmt pat' rhs', thing) }
+        ; return (mkTcBindStmt pat' rhs' mWeight, thing) }
 
 tcArrDoStmt env ctxt (RecStmt { recS_stmts = stmts, recS_later_ids = later_names
                             , recS_rec_ids = rec_names }) res_ty thing_inside
