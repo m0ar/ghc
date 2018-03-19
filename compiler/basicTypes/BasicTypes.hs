@@ -106,7 +106,8 @@ module BasicTypes(
 
         IntWithInf, infinity, treatZeroAsInf, mkIntWithInf, intGtLimit,
 
-        SpliceExplicitFlag(..)
+        SpliceExplicitFlag(..),
+        Weight(..)
    ) where
 
 import GhcPrelude
@@ -1613,3 +1614,7 @@ data SpliceExplicitFlag
           = ExplicitSplice | -- ^ <=> $(f x y)
             ImplicitSplice   -- ^ <=> f x y,  i.e. a naked top level expression
     deriving Data
+
+----------------------------------------------------------------
+-- | Weights for weighted do stmts
+data Weight = Weight Int
