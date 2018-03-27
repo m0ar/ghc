@@ -618,8 +618,8 @@ methodNamesLStmt = methodNamesStmt . unLoc
 
 methodNamesStmt :: StmtLR GhcRn GhcRn (LHsCmd GhcRn) -> FreeVars
 methodNamesStmt (LastStmt cmd _ _)               = methodNamesLCmd cmd
-methodNamesStmt (BodyStmt cmd _ _ _ _)             = methodNamesLCmd cmd
-methodNamesStmt (BindStmt _ cmd _ _ _ _)           = methodNamesLCmd cmd
+methodNamesStmt (BodyStmt cmd _ _ _)             = methodNamesLCmd cmd
+methodNamesStmt (BindStmt _ cmd _ _ _)           = methodNamesLCmd cmd
 methodNamesStmt (RecStmt { recS_stmts = stmts }) =
   methodNamesStmts stmts `addOneFV` loopAName
 methodNamesStmt (LetStmt {})                     = emptyFVs
@@ -1650,8 +1650,8 @@ mkStmtTreeOptimal stmts annMap =
               getStmNameMaybe (L _ (stmtLR), _) = case stmtLR of
                   -- stmtLR :: StmtLR GhcRn GhcRn (LHsExpr GhcRn)
                   -- data StmtLR is defined in HsExpr.hs
-                  (BodyStmt (L _ expr) _ _ _ _)   -> getExpNameMaybe expr
-                  (BindStmt _ (L _ expr) _ _ _ _) -> getExpNameMaybe expr
+                  (BodyStmt (L _ expr) _ _ _)   -> getExpNameMaybe expr
+                  (BindStmt _ (L _ expr) _ _ _) -> getExpNameMaybe expr
                   _ -> Nothing
               getExpNameMaybe :: HsExpr GhcRn -> Maybe Name
               getExpNameMaybe (HsApp (L _ expr) _) = getExpNameMaybe expr

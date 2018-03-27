@@ -405,18 +405,18 @@ tcStmtsAndThen ctxt stmt_chk (L loc stmt : stmts) res_ty thing_inside
 ---------------------------------------------------
 
 tcGuardStmt :: TcExprStmtChecker
-tcGuardStmt _ (BodyStmt guard _ _ _ mWeight) res_ty thing_inside
+tcGuardStmt _ (BodyStmt guard _ _ _) res_ty thing_inside
   = do  { guard' <- tcMonoExpr guard (mkCheckExpType boolTy)
         ; thing  <- thing_inside res_ty
-        ; return (BodyStmt guard' noSyntaxExpr noSyntaxExpr boolTy mWeight, thing) }
+        ; return (BodyStmt guard' noSyntaxExpr noSyntaxExpr boolTy, thing) }
 
-tcGuardStmt ctxt (BindStmt pat rhs _ _ _ mWeight) res_ty thing_inside
+tcGuardStmt ctxt (BindStmt pat rhs _ _ _) res_ty thing_inside
   = do  { (rhs', rhs_ty) <- tcInferSigmaNC rhs
                                    -- Stmt has a context already
         ; (pat', thing)  <- tcPat_O (StmtCtxt ctxt) (lexprCtOrigin rhs)
                                     pat (mkCheckExpType rhs_ty) $
                             thing_inside res_ty
-        ; return (mkTcBindStmt pat' rhs' mWeight, thing) }
+        ; return (mkTcBindStmt pat' rhs', thing) }
 
 tcGuardStmt _ stmt _ _
   = pprPanic "tcGuardStmt: unexpected Stmt" (ppr stmt)
@@ -445,12 +445,12 @@ tcLcStmt _ _ (LastStmt body noret _) elt_ty thing_inside
        ; return (LastStmt body' noret noSyntaxExpr, thing) }
 
 -- A generator, pat <- rhs
-tcLcStmt m_tc ctxt (BindStmt pat rhs _ _ _ mWeight) elt_ty thing_inside
+tcLcStmt m_tc ctxt (BindStmt pat rhs _ _ _) elt_ty thing_inside
  = do   { pat_ty <- newFlexiTyVarTy liftedTypeKind
         ; rhs'   <- tcMonoExpr rhs (mkCheckExpType $ mkTyConApp m_tc [pat_ty])
         ; (pat', thing)  <- tcPat (StmtCtxt ctxt) pat (mkCheckExpType pat_ty) $
                             thing_inside elt_ty
-        ; return (mkTcBindStmt pat' rhs' mWeight, thing) }
+        ; return (mkTcBindStmt pat' rhs', thing) }
 
 -- A boolean guard
 tcLcStmt _ _ (BodyStmt rhs _ _ _) elt_ty thing_inside
@@ -1057,7 +1057,7 @@ tcApplicativeStmts ctxt pairs rhs_ty thing_inside
 
     goArg (ApplicativeArgOne pat rhs isBody, pat_ty, exp_ty)
       = setSrcSpan (combineSrcSpans (getLoc pat) (getLoc rhs)) $
-        addErrCtxt (pprStmtInCtxt ctxt (mkBindStmt pat rhs Nothing)) $
+        addErrCtxt (pprStmtInCtxt ctxt (mkBindStmt pat rhs))   $
         do { rhs' <- tcMonoExprNC rhs (mkCheckExpType exp_ty)
            ; (pat', _) <- tcPat (StmtCtxt ctxt) pat (mkCheckExpType pat_ty) $
                           return ()

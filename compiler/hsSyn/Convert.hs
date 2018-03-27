@@ -992,8 +992,8 @@ cvtStmts :: [TH.Stmt] -> CvtM [Hs.LStmt GhcPs (LHsExpr GhcPs)]
 cvtStmts = mapM cvtStmt
 
 cvtStmt :: TH.Stmt -> CvtM (Hs.LStmt GhcPs (LHsExpr GhcPs))
-cvtStmt (NoBindS e)    = do { e' <- cvtl e; returnL $ mkBodyStmt e' Nothing}
-cvtStmt (TH.BindS p e) = do { p' <- cvtPat p; e' <- cvtl e; returnL $ mkBindStmt p' e' Nothing }
+cvtStmt (NoBindS e)    = do { e' <- cvtl e; returnL $ mkBodyStmt e' }
+cvtStmt (TH.BindS p e) = do { p' <- cvtPat p; e' <- cvtl e; returnL $ mkBindStmt p' e' }
 cvtStmt (TH.LetS ds)   = do { ds' <- cvtLocalDecs (text "a let binding") ds
                             ; returnL $ LetStmt (noLoc ds') }
 cvtStmt (TH.ParS dss)  = do { dss' <- mapM cvt_one dss; returnL $ ParStmt dss' noExpr noSyntaxExpr placeHolderType }
@@ -1017,7 +1017,7 @@ cvtGuard (NormalB e)      = do { e' <- cvtl e; g' <- returnL $ GRHS [] e'; retur
 
 cvtpair :: (TH.Guard, TH.Exp) -> CvtM (LGRHS GhcPs (LHsExpr GhcPs))
 cvtpair (NormalG ge,rhs) = do { ge' <- cvtl ge; rhs' <- cvtl rhs
-                              ; g' <- returnL $ mkBodyStmt ge' Nothing
+                              ; g' <- returnL $ mkBodyStmt ge'
                               ; returnL $ GRHS [g'] rhs' }
 cvtpair (PatG gs,rhs)    = do { gs' <- cvtStmts gs; rhs' <- cvtl rhs
                               ; returnL $ GRHS gs' rhs' }

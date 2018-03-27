@@ -242,13 +242,12 @@ mkNPlusKPat :: Located RdrName -> Located (HsOverLit GhcPs) -> Pat GhcPs
 
 mkLastStmt :: SourceTextX idR
            => Located (bodyR idR) -> StmtLR idL idR (Located (bodyR idR))
-mkBodyStmt :: Located (bodyR GhcPs) -> Maybe Weight
+mkBodyStmt :: Located (bodyR GhcPs)
            -> StmtLR idL GhcPs (Located (bodyR GhcPs))
 mkBindStmt :: (SourceTextX idR, PostTc idR Type ~ PlaceHolder)
-           => LPat idL -> Located (bodyR idR) -> Maybe Weight
+           => LPat idL -> Located (bodyR idR)
            -> StmtLR idL idR (Located (bodyR idR))
 mkTcBindStmt :: LPat GhcTc -> Located (bodyR GhcTc)
-             -> Maybe Weight
              -> StmtLR GhcTc GhcTc (Located (bodyR GhcTc))
 
 emptyRecStmt     :: StmtLR idL  GhcPs bodyR
@@ -301,10 +300,10 @@ mkTransformByStmt  ss u b = emptyTransStmt { trS_form = ThenForm,  trS_stmts = s
 mkGroupUsingStmt   ss u   = emptyTransStmt { trS_form = GroupForm, trS_stmts = ss, trS_using = u }
 mkGroupByUsingStmt ss b u = emptyTransStmt { trS_form = GroupForm, trS_stmts = ss, trS_using = u, trS_by = Just b }
 
-mkBodyStmt body mWeight     = BodyStmt body noSyntaxExpr noSyntaxExpr placeHolderType mWeight
-mkBindStmt pat body mWeight = BindStmt pat body noSyntaxExpr noSyntaxExpr PlaceHolder mWeight
-mkLastStmt body       = LastStmt body False noSyntaxExpr
-mkTcBindStmt pat body mWeight = BindStmt pat body noSyntaxExpr noSyntaxExpr unitTy mWeight
+mkLastStmt body     = LastStmt body False noSyntaxExpr
+mkBodyStmt body     = BodyStmt body noSyntaxExpr noSyntaxExpr placeHolderType
+mkBindStmt pat body = BindStmt pat body noSyntaxExpr noSyntaxExpr PlaceHolder
+mkTcBindStmt pat body = BindStmt pat body noSyntaxExpr noSyntaxExpr unitTy
   -- don't use placeHolderTypeTc above, because that panics during zonking
 
 emptyRecStmt' :: forall idL idR body. SourceTextX idR =>
@@ -988,7 +987,7 @@ collectLStmtBinders = collectStmtBinders . unLoc
 
 collectStmtBinders :: StmtLR idL idR body -> [IdP idL]
   -- Id Binders for a Stmt... [but what about pattern-sig type vars]?
-collectStmtBinders (BindStmt pat _ _ _ _ _)= collectPatBinders pat
+collectStmtBinders (BindStmt pat _ _ _ _)= collectPatBinders pat
 collectStmtBinders (LetStmt (L _ binds)) = collectLocalBinders binds
 collectStmtBinders (BodyStmt {})         = []
 collectStmtBinders (LastStmt {})         = []
@@ -1247,7 +1246,7 @@ lStmtsImplicits = hs_lstmts
     hs_lstmts = foldr (\stmt rest -> unionNameSet (hs_stmt (unLoc stmt)) rest) emptyNameSet
 
     hs_stmt :: StmtLR GhcRn idR (Located (body idR)) -> NameSet
-    hs_stmt (BindStmt pat _ _ _ _ _) = lPatImplicits pat
+    hs_stmt (BindStmt pat _ _ _ _) = lPatImplicits pat
     hs_stmt (ApplicativeStmt args _ _) = unionNameSets (map do_arg args)
       where do_arg (_, ApplicativeArgOne pat _ _) = lPatImplicits pat
             do_arg (_, ApplicativeArgMany stmts _ _) = hs_lstmts stmts
