@@ -2993,7 +2993,7 @@ qual  :: { LStmt GhcPs (LHsExpr GhcPs) }
 -- Optional weighting of do statements for ApplicativeDo
 maybeweight :: { Maybe Weight }
     : {- empty -}                       { Nothing }
-    | '{-# WEIGHT' INTEGER '#-}'        { Just (Weight (getINTEGER $2)) }
+    | '{-# WEIGHT' INTEGER '#-}'        { Just (Weight $ il_value $ getINTEGER $2) }
 
 
 -----------------------------------------------------------------------------

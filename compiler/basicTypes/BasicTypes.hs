@@ -1617,4 +1617,4 @@ data SpliceExplicitFlag
 
 ----------------------------------------------------------------
 -- | Weights for weighted do stmts
-data Weight = Weight Int
+data Weight = Weight Integer
