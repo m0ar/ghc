@@ -255,7 +255,6 @@ tcRnModuleTcRnM hsc_env hsc_src
                 -- automatically considered to be loop breakers
         tcg_env <- getGblEnv ;
         boot_info <- tcHiBootIface hsc_src this_mod ;
-        let { !() = unsafePerformIO.hPutStrLn stdout.show.length $ slurpTopLvlAnn hmod } ;
         setGblEnv (tcg_env { tcg_self_boot = boot_info ,
                              tcg_ann_from_parser = slurpTopLvlAnn hmod }) $ do {
 
