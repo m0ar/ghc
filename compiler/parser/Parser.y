@@ -2982,17 +2982,18 @@ stmt  :: { LStmt GhcPs (LHsExpr GhcPs) }
                                                (mj AnnRec $1:(fst $ unLoc $2)) }
 
 qual  :: { LStmt GhcPs (LHsExpr GhcPs) }
-    : bindpat '<-' exp maybeweight      {% ams (sLL $1 $> $ mkBindStmt $1 $3 $4)
-                                               [mu AnnLarrow $2] }
-    | exp maybeweight                   { sL1 $1 $ mkBodyStmt $1 $2}
+    : bindpat '<-' exp maybeweight      {% (ams (sLL $1 $> $ mkBindStmt $1 $3 )
+                                               [mu AnnLarrow $2]) >>= \l -> aw l $4 }
+
+    | exp maybeweight                   { (sL1 $1 $ mkBodyStmt $1)} -- >>= \l -> aw l $2}
     | 'let' binds                       {% ams (sLL $1 $>$ LetStmt (snd $ unLoc $2))
                                                (mj AnnLet $1:(fst $ unLoc $2)) }
 
 -----------------------------------------------------------------------------
 -- Optional weighting of do statements for ApplicativeDo
-maybeweight :: Maybe Weight
+maybeweight :: { Maybe Weight }
     : {- empty -}                       { Nothing }
-    | { '{-# WEIGHT' int '#-}' }        { Just (Weight $1) }
+    | '{-# WEIGHT' INTEGER '#-}'        { Just (Weight (getINTEGER $2)) }
 
 
 -----------------------------------------------------------------------------
@@ -3512,7 +3513,6 @@ getINLINE       (L _ (ITinline_prag _ inl conl)) = (inl,conl)
 getSPEC_INLINE  (L _ (ITspec_inline_prag _ True))  = (Inline,  FunLike)
 getSPEC_INLINE  (L _ (ITspec_inline_prag _ False)) = (NoInline,FunLike)
 getCOMPLETE_PRAGs (L _ (ITcomplete_prag x)) = x
-getWEIGHT       (L _ (ITweight_prag _ w)) = w
 
 getDOCNEXT (L _ (ITdocCommentNext x)) = x
 getDOCPREV (L _ (ITdocCommentPrev x)) = x
@@ -3550,7 +3550,7 @@ getOVERLAPPING_PRAGs  (L _ (IToverlapping_prag  src)) = src
 getOVERLAPS_PRAGs     (L _ (IToverlaps_prag     src)) = src
 getINCOHERENT_PRAGs   (L _ (ITincoherent_prag   src)) = src
 getCTYPEs             (L _ (ITctype             src)) = src
-getWEIGHT_PRAGs      (L _ (ITweight_prag       src)) = src
+getWEIGHT_PRAGs       (L _ (ITweight_prag       src)) = src
 
 getStringLiteral l = StringLiteral (getSTRINGs l) (getSTRING l)
 
@@ -3760,6 +3760,15 @@ am a (b,s) = do
 --
 ams :: Located a -> [AddAnn] -> P (Located a)
 ams a@(L l _) bs = addAnnsAt l bs >> return a
+
+aw :: Located a -> Maybe Weight -> P (Located a)
+aw a Nothing = pure a
+aw a@(L l _) (Just w) = addWeightAt l w >> return a
+
+addWeightAt :: SrcSpan -> Weight -> P ()
+addWeightAt ss w = P $ \s -> POk s {
+    weight_anns = (ss,w) : weight_anns s
+  } ()
 
 -- |Add all [AddAnn] to an AST element wrapped in a Just
 aljs :: Located (Maybe a) -> [AddAnn] -> P (Located (Maybe a))

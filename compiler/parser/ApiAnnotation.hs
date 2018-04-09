@@ -14,7 +14,7 @@ module ApiAnnotation (
   ) where
 
 import GhcPrelude
-
+import BasicTypes (Weight(..))
 import RdrName
 import Outputable
 import SrcLoc
@@ -132,7 +132,8 @@ https://ghc.haskell.org/trac/ghc/wiki/ApiAnnotations
 
 -- If you update this, update the Note [Api annotations] above
 type ApiAnns = ( Map.Map ApiAnnKey [SrcSpan]
-               , Map.Map SrcSpan [Located AnnotationComment])
+               , Map.Map SrcSpan [Located AnnotationComment]
+               , Map.Map SrcSpan [Weight])
 
 -- If you update this, update the Note [Api annotations] above
 type ApiAnnKey = (SrcSpan,AnnKeywordId)
@@ -141,7 +142,7 @@ type ApiAnnKey = (SrcSpan,AnnKeywordId)
 -- | Retrieve a list of annotation 'SrcSpan's based on the 'SrcSpan'
 -- of the annotated AST element, and the known type of the annotation.
 getAnnotation :: ApiAnns -> SrcSpan -> AnnKeywordId -> [SrcSpan]
-getAnnotation (anns,_) span ann
+getAnnotation (anns,_,_) span ann
    = case Map.lookup (span,ann) anns of
        Nothing -> []
        Just ss -> ss
@@ -151,17 +152,17 @@ getAnnotation (anns,_) span ann
 -- The list is removed from the annotations.
 getAndRemoveAnnotation :: ApiAnns -> SrcSpan -> AnnKeywordId
                        -> ([SrcSpan],ApiAnns)
-getAndRemoveAnnotation (anns,cs) span ann
+getAndRemoveAnnotation (anns,cs,ws) span ann
    = case Map.lookup (span,ann) anns of
-       Nothing -> ([],(anns,cs))
-       Just ss -> (ss,(Map.delete (span,ann) anns,cs))
+       Nothing -> ([],(anns,cs,ws))
+       Just ss -> (ss,(Map.delete (span,ann) anns,cs,ws))
 
 -- |Retrieve the comments allocated to the current 'SrcSpan'
 --
 --  Note: A given 'SrcSpan' may appear in multiple AST elements,
 --  beware of duplicates
 getAnnotationComments :: ApiAnns -> SrcSpan -> [Located AnnotationComment]
-getAnnotationComments (_,anns) span =
+getAnnotationComments (_,anns,_) span =
   case Map.lookup span anns of
     Just cs -> cs
     Nothing -> []
@@ -170,11 +171,14 @@ getAnnotationComments (_,anns) span =
 -- remove them from the annotations
 getAndRemoveAnnotationComments :: ApiAnns -> SrcSpan
                                -> ([Located AnnotationComment],ApiAnns)
-getAndRemoveAnnotationComments (anns,canns) span =
+getAndRemoveAnnotationComments (anns,canns,ws) span =
   case Map.lookup span canns of
-    Just cs -> (cs,(anns,Map.delete span canns))
-    Nothing -> ([],(anns,canns))
+    Just cs -> (cs,(anns,Map.delete span canns,ws))
+    Nothing -> ([],(anns,canns,ws))
 
+
+getWeights :: ApiAnns -> SrcSpan -> Maybe [Weight]
+getWeights (_,_,ws) ss = Map.lookup ss ws
 -- --------------------------------------------------------------------
 
 -- | API Annotations exist so that tools can perform source to source

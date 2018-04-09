@@ -78,6 +78,7 @@ module Lexer (
 import GhcPrelude
 
 -- base
+import BasicTypes (Weight)
 import Control.Monad
 import Control.Monad.Fail as MonadFail
 import Data.Bits
@@ -673,7 +674,7 @@ data Token
   | IToverlapping_prag  SourceText  -- instance overlap mode
   | IToverlaps_prag     SourceText  -- instance overlap mode
   | ITincoherent_prag   SourceText  -- instance overlap mode
-  | ITweight_prag       SourceText Int
+  | ITweight_prag       SourceText
   | ITctype             SourceText
 
   | ITdotdot                    -- reserved symbols
@@ -1924,7 +1925,8 @@ data PState = PState {
         -- See note [Api annotations] in ApiAnnotation.hs
         annotations :: [(ApiAnnKey,[SrcSpan])],
         comment_q :: [Located AnnotationComment],
-        annotations_comments :: [(SrcSpan,[Located AnnotationComment])]
+        annotations_comments :: [(SrcSpan,[Located AnnotationComment])],
+        weight_anns :: [(SrcSpan,Weight)]
      }
         -- last_loc and last_len are used when generating error messages,
         -- and in pushCurrentContext only.  Sigh, if only Happy passed the
@@ -2427,7 +2429,8 @@ mkPStatePure options buf loc =
       use_pos_prags = True,
       annotations = [],
       comment_q = [],
-      annotations_comments = []
+      annotations_comments = [],
+      weight_anns = []
     }
 
 addWarning :: WarningFlag -> SrcSpan -> SDoc -> P ()
@@ -2888,7 +2891,8 @@ oneWordPrags = Map.fromList [
      ("incoherent", strtoken (\s -> ITincoherent_prag (SourceText s))),
      ("ctype", strtoken (\s -> ITctype (SourceText s))),
      ("complete", strtoken (\s -> ITcomplete_prag (SourceText s))),
-     ("column", columnPrag)
+     ("column", columnPrag),
+     ("weight", strtoken (\s -> ITweight_prag (SourceText s)))
      ]
 
 twoWordPrags = Map.fromList([
@@ -2901,9 +2905,7 @@ twoWordPrags = Map.fromList([
      ("specialize notinline",
          strtoken (\s -> (ITspec_inline_prag (SourceText s) False))),
      ("vectorize scalar",
-         strtoken (\s -> ITvect_scalar_prag (SourceText s))),
-     ("weight int",
-         strtoken (\s -> ITweight_prag (SourceText s)))])
+         strtoken (\s -> ITvect_scalar_prag (SourceText s)))])
 
 dispatch_pragmas :: Map String Action -> Action
 dispatch_pragmas prags span buf len = case Map.lookup (clean_pragma (lexemeToString buf len)) prags of
