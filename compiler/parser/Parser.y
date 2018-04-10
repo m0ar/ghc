@@ -2982,10 +2982,10 @@ stmt  :: { LStmt GhcPs (LHsExpr GhcPs) }
                                                (mj AnnRec $1:(fst $ unLoc $2)) }
 
 qual  :: { LStmt GhcPs (LHsExpr GhcPs) }
-    : bindpat '<-' exp maybeweight      {% (ams (sLL $1 $> $ mkBindStmt $1 $3 )
-                                               [mu AnnLarrow $2]) >>= \l -> aw l $4 }
+    : bindpat '<-' exp maybeweight      {% (ams (sLL $1 $3 $ mkBindStmt $1 $3)
+                                               [mu AnnLarrow $2]) >>= aw $4 }
 
-    | exp maybeweight                   { (sL1 $1 $ mkBodyStmt $1)} -- >>= \l -> aw l $2}
+    | exp maybeweight                   {% aw $2 (sL1 $1 $ mkBodyStmt $1) }
     | 'let' binds                       {% ams (sLL $1 $>$ LetStmt (snd $ unLoc $2))
                                                (mj AnnLet $1:(fst $ unLoc $2)) }
 
@@ -3761,9 +3761,9 @@ am a (b,s) = do
 ams :: Located a -> [AddAnn] -> P (Located a)
 ams a@(L l _) bs = addAnnsAt l bs >> return a
 
-aw :: Located a -> Maybe Weight -> P (Located a)
-aw a Nothing = pure a
-aw a@(L l _) (Just w) = addWeightAt l w >> return a
+aw :: Maybe Weight -> Located a -> P (Located a)
+aw Nothing a = return a
+aw (Just w) a@(L l _)  = addWeightAt l w >> return a
 
 addWeightAt :: SrcSpan -> Weight -> P ()
 addWeightAt ss w = P $ \s -> POk s {
