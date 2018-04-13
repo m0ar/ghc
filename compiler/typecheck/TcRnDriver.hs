@@ -240,10 +240,11 @@ tcRnModuleTcRnM :: HscEnv
 tcRnModuleTcRnM hsc_env hsc_src
                 (HsParsedModule {
                    hpm_module =
-                      (L loc hmod@(HsModule maybe_mod export_ies
+                      (L loc (HsModule maybe_mod export_ies
                                        import_decls local_decls mod_deprec
                                        maybe_doc_hdr)),
-                   hpm_src_files = src_files
+                   hpm_src_files = src_files,
+                   hpm_annotations = (_,_,ssToWeights)
                 })
                 (this_mod, prel_imp_loc)
  = setSrcSpan loc $
@@ -256,7 +257,7 @@ tcRnModuleTcRnM hsc_env hsc_src
         tcg_env <- getGblEnv ;
         boot_info <- tcHiBootIface hsc_src this_mod ;
         setGblEnv (tcg_env { tcg_self_boot = boot_info ,
-                             tcg_ann_from_parser = slurpTopLvlAnn hmod }) $ do {
+                             tcg_ann_from_parser = ssToWeights }) $ do {
 
         -- Deal with imports; first add implicit prelude
         implicit_prelude <- xoptM LangExt.ImplicitPrelude;
