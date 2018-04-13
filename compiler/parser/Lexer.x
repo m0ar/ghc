@@ -1926,7 +1926,7 @@ data PState = PState {
         annotations :: [(ApiAnnKey,[SrcSpan])],
         comment_q :: [Located AnnotationComment],
         annotations_comments :: [(SrcSpan,[Located AnnotationComment])],
-        weight_anns :: [(SrcSpan,Weight)]
+        weight_anns :: [(SrcSpan,[Weight])]
      }
         -- last_loc and last_len are used when generating error messages,
         -- and in pushCurrentContext only.  Sigh, if only Happy passed the

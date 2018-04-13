@@ -383,7 +383,8 @@ hscParse' mod_summary
                       hpm_annotations
                               = (Map.fromListWith (++) $ annotations pst,
                                  Map.fromList $ ((noSrcSpan,comment_q pst)
-                                                 :(annotations_comments pst)))
+                                                 :(annotations_comments pst)),
+                                 Map.fromList $ weight_anns pst)
                    }
 
             -- apply parse transformation of plugins
