@@ -24,7 +24,7 @@ testOneFile libdir fileName = do
              case ml_hs_file $ ms_location m of
                Nothing -> False
                Just fn -> fn == fileName
-       ((anns,_cs),p) <- runGhc (Just libdir) $ do
+       ((anns,_cs,_ws),p) <- runGhc (Just libdir) $ do
                         dflags <- getSessionDynFlags
                         _ <- setSessionDynFlags dflags
                         addTarget Target { targetId = TargetFile fileName Nothing

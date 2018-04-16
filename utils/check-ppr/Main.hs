@@ -87,13 +87,13 @@ parseOneFile libdir fileName = do
          parseModule modSum
 
 getPragmas :: ApiAnns -> String
-getPragmas anns = pragmaStr
+getPragmas (_,annComments,_) = pragmaStr
   where
     tokComment (L _ (AnnBlockComment s)) = s
     tokComment (L _ (AnnLineComment  s)) = s
     tokComment _ = ""
 
-    comments = case Map.lookup noSrcSpan (snd anns) of
+    comments = case Map.lookup noSrcSpan  annComments of
       Nothing -> []
       Just cl -> map tokComment $ sortLocated cl
     pragmas = filter (\c -> isPrefixOf "{-#" c ) comments
