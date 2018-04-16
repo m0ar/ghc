@@ -1528,7 +1528,6 @@ rearrangeForApplicativeDo
   :: HsStmtContext Name
   -> [(ExprLStmt GhcRn, FreeVars)]
   -> RnM ([ExprLStmt GhcRn], FreeVars)
-
 rearrangeForApplicativeDo _ [] = return ([], emptyNameSet)
 rearrangeForApplicativeDo _ [(one,_)] = return ([one], emptyNameSet)
 rearrangeForApplicativeDo ctxt stmts0 = do
@@ -1588,14 +1587,14 @@ mkStmtTreeHeuristic stmts =
 -- | Turn a sequence of statements into an ExprStmtTree optimally,
 -- using dynamic programming.  /O(n^3)/
 mkStmtTreeOptimal :: [(ExprLStmt GhcRn, FreeVars)] ->
-                     Map.Map OccName (HsExpr GhcPs) ->
+                     Map.Map SrcSpan [Weight] ->
                      ExprStmtTree
-mkStmtTreeOptimal stmts annMap =
+mkStmtTreeOptimal stmts weightMap =
   ASSERT(not (null stmts)) -- the empty case is handled by the caller;
                            -- we don't support empty StmtTrees.
   fst (arr ! (0,n))
   where
-    !() = unsafePrint $ "annMap size:"  ++ (show $ Map.size annMap)
+    !() = unsafePrint $ "weightMap size:"  ++ (show $ Map.size weightMap)
     n = length stmts - 1
     stmt_arr = listArray (0,n) stmts
 
@@ -1640,64 +1639,27 @@ mkStmtTreeOptimal stmts annMap =
          -- that the optimal solution is the lower of the two.  Only
          -- in the case that these two have the same cost do we need
          -- to do the exhaustive search.
-         --
 
-         -- Annotated weights:
-         getCurrentName :: Int -> Maybe Name
-         getCurrentName stmIndex = getStmNameMaybe (stmt_arr ! stmIndex)
+         -- First arg is the stmt index, returns corresponding
+         -- weight. If none annotated, default to unit weight.
+         getCurrentWeight :: Int -> Int
+         getCurrentWeight sIx = case stmts !! sIx of
+              (L ss _, _) -> check ss $ Map.lookup ss weightMap
             where
-              getStmNameMaybe :: (ExprLStmt GhcRn, FreeVars) -> Maybe Name
-              getStmNameMaybe (L _ (stmtLR), _) = case stmtLR of
-                  -- stmtLR :: StmtLR GhcRn GhcRn (LHsExpr GhcRn)
-                  -- data StmtLR is defined in HsExpr.hs
-                  (BodyStmt (L _ expr) _ _ _)   -> getExpNameMaybe expr
-                  (BindStmt _ (L _ expr) _ _ _) -> getExpNameMaybe expr
-                  _ -> Nothing
-              getExpNameMaybe :: HsExpr GhcRn -> Maybe Name
-              getExpNameMaybe (HsApp (L _ expr) _) = getExpNameMaybe expr
-              getExpNameMaybe (HsVar (L _ name))   = Just name
-              getExpNameMaybe _ = Nothing
-
-         getCurrentWeight :: Int -> Maybe Integer
-         getCurrentWeight i = join $ getWeightFromWeightExpr <$> getWeightExpr i
-            where
-              getWeightExpr :: Int -> Maybe (HsExpr GhcPs)
-              getWeightExpr i = join $ (flip Map.lookup annMap . nameOccName) <$> getCurrentName i
-
-              getWeightFromWeightExpr :: HsExpr GhcPs -> Maybe Integer
-              getWeightFromWeightExpr (HsPar (L _ exp)) = getWeightFromWeightExpr exp -- Remove parentheses
-              getWeightFromWeightExpr (HsApp (L _ varExp) (L _ valExp))
-                | maybe False isValidWeightRdrName $ extractRdrName varExp
-                              = getWeightFromWeightExpr valExp -- Get the integer value
-                | otherwise   = Nothing
-              getWeightFromWeightExpr (HsOverLit overLit) =
-                              case ol_val overLit of -- Convert to integer
-                              HsIntegral i -> Just $ il_value i
-                              _            -> Nothing
-              getWeightFromWeightExpr _  = Nothing
-
-              extractRdrName :: HsExpr GhcPs -> Maybe RdrName
-              extractRdrName (HsPar (L _ e))    = extractRdrName e
-              extractRdrName (HsVar (L _ name)) = Just name
-              extractRdrName _                  = Nothing
-
-              -- TODO: Make this safer
-              -- [isRdrDataCon 1, isUnqual 1, isSrcRdrName 1]
-              isValidWeightRdrName :: RdrName -> Bool
-              isValidWeightRdrName rdrName = rdrName == weightRdrName
-                where weightRdrName :: RdrName
-                      weightRdrName = mkUnqual dataName (fsLit $ "Weight")
+              check :: SrcSpan -> Maybe [Weight] -> Int
+              check _ Nothing = 1
+              check _ (Just [Weight w]) = fromIntegral w
+              check ss (Just ws) = panic $ "Several weighs on SrcSpan:\n" ++ show ss
 
          !() = unsafePrint $ "AdoStm: "
                     ++ "(" ++ (show lo) ++ " / " ++ (show hi)++ ") :: "
-                    ++ (showJ $ getCurrentName lo) ++ " / "
-                    ++ (showJ $ getCurrentName hi) ++ " :: "
+                    ++ (show lo) ++ " / "
+                    ++ (show hi) ++ " :: "
                     ++ (show $ getCurrentWeight lo) ++ " / "
                     ++ (show $ getCurrentWeight hi)
-            where showJ = maybe "Other" (showSDocUnsafe . ppr)
 
-         loCost = maybe 1 fromInteger $ getCurrentWeight lo
-         hiCost = maybe 1 fromInteger $ getCurrentWeight hi
+         loCost = getCurrentWeight lo
+         hiCost = getCurrentWeight hi
          ((before,c1),(after,c2))
            | hi - lo == 1
            = ((StmtTreeOne (stmt_arr ! lo), loCost),
