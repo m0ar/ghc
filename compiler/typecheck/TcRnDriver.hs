@@ -131,10 +131,8 @@ import qualified GHC.LanguageExtensions as LangExt
 import Data.Data ( Data )
 import HsDumpAst
 import qualified Data.Set as S
-import qualified Data.Map.Lazy as M ( Map )
 
 import Control.Monad
-)
 
 #include "HsVersions.h"
 
