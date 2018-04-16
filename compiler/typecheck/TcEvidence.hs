@@ -21,7 +21,7 @@ module TcEvidence (
   -- EvTerm (already a CoreExpr)
   EvTerm(..), EvExpr,
   evId, evCoercion, evCast, evDFunApp,  evSelector,
-  mkEvCast, evVarsOfTerm, mkEvScSelectors, evTypeable,
+  mkEvCast, evVarsOfTerm, mkEvScSelectors, evTypeable, findNeededEvVars,
 
   evTermCoercion,
   EvCallStack(..),
@@ -401,6 +401,14 @@ data EvBindsVar
       -- See Note [Tracking redundant constraints] in TcSimplify
     }
 
+  | NoEvBindsVar {  -- used when we're solving only for equalities,
+                    -- which don't have bindings
+
+        -- see above for comments
+      ebv_uniq :: Unique,
+      ebv_tcvs :: IORef CoVarSet
+    }
+
 instance Data.Data TcEvBinds where
   -- Placeholder; we can't travers into TcEvBinds
   toConstr _   = abstractConstr "TcEvBinds"
@@ -765,6 +773,33 @@ evTermCoercion (EvExpr (Coercion co)) = co
 evTermCoercion (EvExpr (Cast tm co))  = mkCoCast (evTermCoercion (EvExpr tm)) co
 evTermCoercion tm                     = pprPanic "evTermCoercion" (ppr tm)
 
+
+{-
+************************************************************************
+*                                                                      *
+                  Free variables
+*                                                                      *
+************************************************************************
+-}
+
+findNeededEvVars :: EvBindMap -> VarSet -> VarSet
+findNeededEvVars ev_binds seeds
+  = transCloVarSet also_needs seeds
+  where
+   also_needs :: VarSet -> VarSet
+   also_needs needs = nonDetFoldUniqSet add emptyVarSet needs
+     -- It's OK to use nonDetFoldUFM here because we immediately
+     -- forget about the ordering by creating a set
+
+   add :: Var -> VarSet -> VarSet
+   add v needs
+     | Just ev_bind <- lookupEvBind ev_binds v
+     , EvBind { eb_is_given = is_given, eb_rhs = rhs } <- ev_bind
+     , is_given
+     = evVarsOfTerm rhs `unionVarSet` needs
+     | otherwise
+     = needs
+
 evVarsOfTerm :: EvTerm -> VarSet
 evVarsOfTerm (EvExpr e)         = exprSomeFreeVars isEvVar e
 evVarsOfTerm (EvTypeable _ ev)  = evVarsOfTypeable ev
@@ -846,9 +881,11 @@ instance Outputable TcEvBinds where
 instance Outputable EvBindsVar where
   ppr (EvBindsVar { ebv_uniq = u })
      = text "EvBindsVar" <> angleBrackets (ppr u)
+  ppr (NoEvBindsVar { ebv_uniq = u })
+     = text "NoEvBindsVar" <> angleBrackets (ppr u)
 
 instance Uniquable EvBindsVar where
-  getUnique (EvBindsVar { ebv_uniq = u }) = u
+  getUnique = ebv_uniq
 
 instance Outputable EvBind where
   ppr (EvBind { eb_lhs = v, eb_rhs = e, eb_is_given = is_given })

@@ -117,7 +117,7 @@ withPlugins df transformation input
   = foldM (\arg (LoadedPlugin p _ opts) -> transformation p opts arg)
           input (plugins df)
 
--- | Perform a constaint operation by using all of the plugins in turn.
+-- | Perform a constant operation by using all of the plugins in turn.
 withPlugins_ :: Monad m => DynFlags -> ConstPluginOperation m a -> a -> m ()
 withPlugins_ df transformation input
   = mapM_ (\(LoadedPlugin p _ opts) -> transformation p opts input)

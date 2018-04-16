@@ -73,7 +73,7 @@ test('T1969',
              # 2017-03-24 9261052 (x86/Linux, 64-bit machine)
              # 2017-04-06 9418680 (x86/Linux, 64-bit machine)
 
-           (wordsize(64), 19199872, 15)]),
+           (wordsize(64), 22311600, 15)]),
              # 2014-09-10 10463640, 10  # post-AMP-update (somewhat stabelish)
                # looks like the peak is around ~10M, but we're
                # unlikely to GC exactly on the peak.
@@ -89,6 +89,7 @@ test('T1969',
              # 2017-02-14 16393848 Early inline patch
              # 2017-03-31 16679176 Fix memory leak in simplifier
              # 2017-08-25 19199872 Refactor the Mighty Simplifier
+             # 2018-02-19 22311600 (amd64/Linux) Unknown
 
       compiler_stats_num_field('bytes allocated',
           [(platform('i386-unknown-mingw32'), 301784492, 5),
@@ -664,7 +665,7 @@ test('T5837',
              # 2017-04-21                       54985248 (x64/Windows) - Unknown
              # 2017-12-24                       54793816 (x64/Windows) - Unknown
 
-           (wordsize(64), 52089424, 7)])
+           (wordsize(64), 55813608, 7)])
              # sample: 3926235424 (amd64/Linux, 15/2/2012)
              # 2012-10-02 81879216
              # 2012-09-20 87254264 amd64/Linux
@@ -702,6 +703,7 @@ test('T5837',
              # 2017-02-25 52625920  amd64/Linux Early inlining patch
              # 2017-09-06 56782344  amd64/Linux Drift manifest in unrelated LLVM patch
              # 2017-10-24 52089424  amd64/linux Fix space leak in BinIface.getSymbolTable
+             # 2018-02-19 55813608  amd64/Linux Unknown
       ],
       compile, ['-freduction-depth=50'])
 
@@ -814,7 +816,7 @@ test('T9675',
 test('T9872a',
      [ only_ways(['normal']),
        compiler_stats_num_field('bytes allocated',
-          [(wordsize(64), 3005891848, 5),
+          [(wordsize(64), 2729927408, 5),
           # 2014-12-10    5521332656    Initally created
           # 2014-12-16    5848657456    Flattener parameterized over roles
           # 2014-12-18    2680733672    Reduce type families even more eagerly
@@ -823,6 +825,7 @@ test('T9872a',
           # 2016-10-19    3134866040    Refactor traceRn interface (#12617)
           # 2017-02-17    3298422648    Type-indexed Typeable
           # 2017-02-25    3005891848    Early inlining patch
+          # 2018-03-26    2729927408    Flattener update with optimizations (#12919)
 
            (wordsize(32), 1493198244, 5)
           # was           1325592896
@@ -857,7 +860,7 @@ test('T9872b',
 test('T9872c',
      [ only_ways(['normal']),
        compiler_stats_num_field('bytes allocated',
-          [(wordsize(64), 3404346032, 5),
+          [(wordsize(64), 3096670112, 5),
           # 2014-12-10    5495850096    Initally created
           # 2014-12-16    5842024784    Flattener parameterized over roles
           # 2014-12-18    2963554096    Reduce type families even more eagerly
@@ -866,6 +869,7 @@ test('T9872c',
           # 2016-04-06:   4306667256    Refactoring of CSE #11781
           # 2016-09-15:   3702580928    Fixing #12422
           # 2017-02-14    3404346032    Early inlining: 5% improvement
+          # 2018-03-25    3096670112    Flattener patch with optimizations (#12919)
 
            (wordsize(32), 1727582260, 5)
           # was           1500000000
@@ -878,7 +882,7 @@ test('T9872c',
 test('T9872d',
      [ only_ways(['normal']),
        compiler_stats_num_field('bytes allocated',
-          [(wordsize(64), 462817352, 5),
+          [(wordsize(64), 526485920, 5),
           # 2014-12-18    796071864   Initally created
           # 2014-12-18    739189056   Reduce type families even more eagerly
           # 2015-01-07    687562440   TrieMap leaf compression
@@ -891,6 +895,7 @@ test('T9872d',
           # 2017-02-17    535565128   Type-indexed Typeable
           # 2017-02-25    498855104   Early inlining
           # 2017-03-03    462817352   Share Typeable KindReps
+          # 2018-03-25    526485920   Flattener patch does more work (#12919)
 
            (wordsize(32), 232954000, 5)
           # some date     328810212
@@ -1210,6 +1215,19 @@ test('T13719',
      multimod_compile,
      ['T13719', '-v0'])
 
+test('T14697',
+     [ compiler_stats_num_field('bytes allocated',
+          [(wordsize(64), 337290376, 10),
+          # initial:    635573784
+          # 2018-02-23: 337290376 Cache the fingerprint of sOpt_P
+          ]),
+       pre_cmd('./genT14697'),
+       extra_files(['genT14697']),
+       extra_hc_opts('$(cat T14697-flags)'), # 10k -optP arguments
+     ],
+     multimod_compile,
+     ['T14697', '-v0'])
+
 test('Naperian',
      [ reqlib('vector'),
        only_ways(['optasm']),
@@ -1226,9 +1244,10 @@ test ('T9630',
       [ compiler_stats_num_field('max_bytes_used', # Note [residency]
           [(platform('x86_64-unknown-mingw32'),   39867088, 15),
           # 2017-12-24:                     34171816 (x64/Windows)
-          (wordsize(64), 41568168, 15)
+          (wordsize(64), 35324712, 15)
           # initial:    56955240
           # 2017-06-07: 41568168     Stop the specialiser generating loopy code
+          # 2018-02-25: 35324712     It's not entirely clear
           ]),
       extra_clean(['T9630a.hi', 'T9630a.o'])
       ],

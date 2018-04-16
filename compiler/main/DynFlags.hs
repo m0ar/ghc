@@ -59,6 +59,7 @@ module DynFlags (
         tablesNextToCode, mkTablesNextToCode,
         makeDynFlagsConsistent,
         shouldUseColor,
+        shouldUseHexWordLiterals,
         positionIndependent,
         optimisationFlags,
 
@@ -89,6 +90,7 @@ module DynFlags (
         pgm_L, pgm_P, pgm_F, pgm_c, pgm_s, pgm_a, pgm_l, pgm_dll, pgm_T,
         pgm_windres, pgm_libtool, pgm_ar, pgm_ranlib, pgm_lo, pgm_lc,
         pgm_lcc, pgm_i, opt_L, opt_P, opt_F, opt_c, opt_a, opt_l, opt_i,
+        opt_P_signature,
         opt_windres, opt_lo, opt_lc, opt_lcc,
 
         -- ** Manipulating DynFlags
@@ -164,7 +166,10 @@ module DynFlags (
         CompilerInfo(..),
 
         -- * File cleanup
-        FilesToClean(..), emptyFilesToClean
+        FilesToClean(..), emptyFilesToClean,
+
+        -- * Include specifications
+        IncludeSpecs(..), addGlobalInclude, addQuoteInclude, flattenIncludes
   ) where
 
 #include "HsVersions.h"
@@ -193,6 +198,7 @@ import qualified Pretty
 import SrcLoc
 import BasicTypes       ( IntWithInf, treatZeroAsInf )
 import FastString
+import Fingerprint
 import Outputable
 import Foreign.C        ( CInt(..) )
 import System.IO.Unsafe ( unsafeDupablePerformIO )
@@ -439,11 +445,12 @@ data GeneralFlag
    | Opt_CallArity
    | Opt_Exitification
    | Opt_Strictness
-   | Opt_LateDmdAnal
+   | Opt_LateDmdAnal                    -- #6087
    | Opt_KillAbsence
    | Opt_KillOneShot
    | Opt_FullLaziness
    | Opt_FloatIn
+   | Opt_LateSpecialise
    | Opt_Specialise
    | Opt_SpecialiseAggressively
    | Opt_CrossModuleSpecialise
@@ -473,6 +480,7 @@ data GeneralFlag
    | Opt_IrrefutableTuples
    | Opt_CmmSink
    | Opt_CmmElimCommonBlocks
+   | Opt_AsmShortcutting
    | Opt_OmitYields
    | Opt_FunToThunk               -- allow WwLib.mkWorkerArgs to remove all value lambdas
    | Opt_DictsStrict                     -- be strict in argument dictionaries
@@ -483,6 +491,7 @@ data GeneralFlag
    | Opt_SolveConstantDicts
    | Opt_AlignmentSanitisation
    | Opt_CatchBottoms
+   | Opt_NumConstantFolding
 
    -- PreInlining is on by default. The option is there just to see how
    -- bad things get if you turn it off!
@@ -534,6 +543,7 @@ data GeneralFlag
    | Opt_PIC                         -- ^ @-fPIC@
    | Opt_PIE                         -- ^ @-fPIE@
    | Opt_PICExecutable               -- ^ @-pie@
+   | Opt_ExternalDynamicRefs
    | Opt_SccProfilingOn
    | Opt_Ticky
    | Opt_Ticky_Allocd
@@ -556,8 +566,11 @@ data GeneralFlag
    | Opt_PprShowTicks
    | Opt_ShowHoleConstraints
    | Opt_NoShowValidSubstitutions
+   | Opt_UnclutterValidSubstitutions
    | Opt_NoSortValidSubstitutions
+   | Opt_AbstractRefSubstitutions
    | Opt_ShowLoadedModules
+   | Opt_HexWordLiterals -- See Note [Print Hexadecimal Literals]
 
    -- Suppress all coercions, them replacing with '...'
    | Opt_SuppressCoercions
@@ -579,6 +592,7 @@ data GeneralFlag
    | Opt_SuppressUniques
    | Opt_SuppressStgFreeVars
    | Opt_SuppressTicks     -- Replaces Opt_PprShowTicks
+   | Opt_SuppressTimestamps -- ^ Suppress timestamps in dumps
 
    -- temporary flags
    | Opt_AutoLinkPackages
@@ -622,6 +636,7 @@ optimisationFlags = EnumSet.fromList
    , Opt_KillOneShot
    , Opt_FullLaziness
    , Opt_FloatIn
+   , Opt_LateSpecialise
    , Opt_Specialise
    , Opt_SpecialiseAggressively
    , Opt_CrossModuleSpecialise
@@ -651,6 +666,7 @@ optimisationFlags = EnumSet.fromList
    , Opt_IrrefutableTuples
    , Opt_CmmSink
    , Opt_CmmElimCommonBlocks
+   , Opt_AsmShortcutting
    , Opt_OmitYields
    , Opt_FunToThunk
    , Opt_DictsStrict
@@ -673,6 +689,33 @@ data WarnReason
   -- | Warning was made an error because of -Werror or -Werror=WarningFlag
   | ErrReason !(Maybe WarningFlag)
   deriving Show
+
+-- | Used to differentiate the scope an include needs to apply to.
+-- We have to split the include paths to avoid accidentally forcing recursive
+-- includes since -I overrides the system search paths. See Trac #14312.
+data IncludeSpecs
+  = IncludeSpecs { includePathsQuote  :: [String]
+                 , includePathsGlobal :: [String]
+                 }
+  deriving Show
+
+-- | Append to the list of includes a path that shall be included using `-I`
+-- when the C compiler is called. These paths override system search paths.
+addGlobalInclude :: IncludeSpecs -> [String] -> IncludeSpecs
+addGlobalInclude spec paths  = let f = includePathsGlobal spec
+                               in spec { includePathsGlobal = f ++ paths }
+
+-- | Append to the list of includes a path that shall be included using
+-- `-iquote` when the C compiler is called. These paths only apply when quoted
+-- includes are used. e.g. #include "foo.h"
+addQuoteInclude :: IncludeSpecs -> [String] -> IncludeSpecs
+addQuoteInclude spec paths  = let f = includePathsQuote spec
+                              in spec { includePathsQuote = f ++ paths }
+
+-- | Concatenate and flatten the list of global and quoted includes returning
+-- just a flat list of paths.
+flattenIncludes :: IncludeSpecs -> [String]
+flattenIncludes specs = includePathsQuote specs ++ includePathsGlobal specs
 
 instance Outputable WarnReason where
   ppr = text . show
@@ -793,6 +836,7 @@ data DynFlags = DynFlags {
   maxSimplIterations    :: Int,         -- ^ Max simplifier iterations
   maxPmCheckIterations  :: Int,         -- ^ Max no iterations for pm checking
   ruleCheck             :: Maybe String,
+  inlineCheck           :: Maybe String, -- ^ A prefix to report inlining decisions about
   strictnessBefore      :: [Int],       -- ^ Additional demand analysis
 
   parMakeCount          :: Maybe Int,   -- ^ The number of modules to compile in parallel
@@ -806,6 +850,12 @@ data DynFlags = DynFlags {
                                         --   to show in type error messages
   maxValidSubstitutions :: Maybe Int,   -- ^ Maximum number of substitutions to
                                         --   show in typed hole error messages
+  maxRefSubstitutions   :: Maybe Int,   -- ^ Maximum number of refinement
+                                        --   substitutions to show in typed hole
+                                        --   error messages
+  refLevelSubstitutions :: Maybe Int,   -- ^ Maximum level of refinement for
+                                        --   refinement substitutions in typed
+                                        --   typed hole error messages
   maxUncoveredPatterns  :: Int,         -- ^ Maximum number of unmatched patterns to show
                                         --   in non-exhaustiveness warnings
   simplTickFactor       :: Int,         -- ^ Multiplier for simplifier ticks
@@ -867,7 +917,7 @@ data DynFlags = DynFlags {
 
   ldInputs              :: [Option],
 
-  includePaths          :: [String],
+  includePaths          :: IncludeSpecs,
   libraryPaths          :: [String],
   frameworkPaths        :: [String],    -- used on darwin only
   cmdlineFrameworks     :: [String],    -- ditto
@@ -1137,6 +1187,8 @@ data Settings = Settings {
   -- options for particular phases
   sOpt_L                 :: [String],
   sOpt_P                 :: [String],
+  sOpt_P_fingerprint     :: Fingerprint, -- cached Fingerprint of sOpt_P
+                                         -- See Note [Repeated -optP hashing]
   sOpt_F                 :: [String],
   sOpt_c                 :: [String],
   sOpt_a                 :: [String],
@@ -1209,6 +1261,14 @@ opt_L dflags = sOpt_L (settings dflags)
 opt_P                 :: DynFlags -> [String]
 opt_P dflags = concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
             ++ sOpt_P (settings dflags)
+
+-- This function packages everything that's needed to fingerprint opt_P
+-- flags. See Note [Repeated -optP hashing].
+opt_P_signature       :: DynFlags -> ([String], Fingerprint)
+opt_P_signature dflags =
+  ( concatMap (wayOptP (targetPlatform dflags)) (ways dflags)
+  , sOpt_P_fingerprint (settings dflags))
+
 opt_F                 :: DynFlags -> [String]
 opt_F dflags = sOpt_F (settings dflags)
 opt_c                 :: DynFlags -> [String]
@@ -1430,6 +1490,10 @@ data RtsOptsEnabled
 shouldUseColor :: DynFlags -> Bool
 shouldUseColor dflags = overrideWith (canUseColor dflags) (useColor dflags)
 
+shouldUseHexWordLiterals :: DynFlags -> Bool
+shouldUseHexWordLiterals dflags =
+  Opt_HexWordLiterals `EnumSet.member` generalFlags dflags
+
 -- | Are we building with @-fPIE@ or @-fPIC@ enabled?
 positionIndependent :: DynFlags -> Bool
 positionIndependent dflags = gopt Opt_PIC dflags || gopt Opt_PIE dflags
@@ -1513,7 +1577,7 @@ wayGeneralFlags :: Platform -> Way -> [GeneralFlag]
 wayGeneralFlags _ (WayCustom {}) = []
 wayGeneralFlags _ WayThreaded = []
 wayGeneralFlags _ WayDebug    = []
-wayGeneralFlags _ WayDyn      = [Opt_PIC]
+wayGeneralFlags _ WayDyn      = [Opt_PIC, Opt_ExternalDynamicRefs]
     -- We could get away without adding -fPIC when compiling the
     -- modules of a program that is to be linked with -dynamic; the
     -- program itself does not need to be position-independent, only
@@ -1670,8 +1734,11 @@ defaultDynFlags mySettings myLlvmTargets =
         maxSimplIterations      = 4,
         maxPmCheckIterations    = 2000000,
         ruleCheck               = Nothing,
+        inlineCheck             = Nothing,
         maxRelevantBinds        = Just 6,
         maxValidSubstitutions   = Just 6,
+        maxRefSubstitutions     = Just 6,
+        refLevelSubstitutions   = Nothing,
         maxUncoveredPatterns    = 4,
         simplTickFactor         = 100,
         specConstrThreshold     = Just 2000,
@@ -1725,7 +1792,7 @@ defaultDynFlags mySettings myLlvmTargets =
         dumpPrefix              = Nothing,
         dumpPrefixForce         = Nothing,
         ldInputs                = [],
-        includePaths            = [],
+        includePaths            = IncludeSpecs [] [],
         libraryPaths            = [],
         frameworkPaths          = [],
         cmdlineFrameworks       = [],
@@ -2306,7 +2373,8 @@ setOutputFile, setDynOutputFile, setOutputHi, setDumpPrefixForce
 
 setObjectDir  f d = d { objectDir  = Just f}
 setHiDir      f d = d { hiDir      = Just f}
-setStubDir    f d = d { stubDir    = Just f, includePaths = f : includePaths d }
+setStubDir    f d = d { stubDir    = Just f
+                      , includePaths = addGlobalInclude (includePaths d) [f] }
   -- -stubdir D adds an implicit -I D, so that gcc can find the _stub.h file
   -- \#included from the .hc file when compiling via C (i.e. unregisterised
   -- builds).
@@ -2400,7 +2468,12 @@ setDumpPrefixForce f d = d { dumpPrefixForce = f}
 setPgmP   f = let (pgm:args) = words f in alterSettings (\s -> s { sPgm_P   = (pgm, map Option args)})
 addOptl   f = alterSettings (\s -> s { sOpt_l   = f : sOpt_l s})
 addOptc   f = alterSettings (\s -> s { sOpt_c   = f : sOpt_c s})
-addOptP   f = alterSettings (\s -> s { sOpt_P   = f : sOpt_P s})
+addOptP   f = alterSettings (\s -> s { sOpt_P   = f : sOpt_P s
+                                     , sOpt_P_fingerprint = fingerprintStrings (f : sOpt_P s)
+                                     })
+                                     -- See Note [Repeated -optP hashing]
+  where
+  fingerprintStrings ss = fingerprintFingerprints $ map fingerprintString ss
 
 
 setDepMakefile :: FilePath -> DynFlags -> DynFlags
@@ -2947,6 +3020,8 @@ dynamic_flags_deps = [
         (NoArg (setRtsOptsEnabled RtsOptsNone))
   , make_ord_flag defGhcFlag "no-rtsopts-suggestions"
       (noArg (\d -> d {rtsOptsSuggestions = False}))
+  , make_ord_flag defGhcFlag "dhex-word-literals"
+        (NoArg (setGeneralFlag Opt_HexWordLiterals))
 
   , make_ord_flag defGhcFlag "ghcversion-file"      (hasArg addGhcVersionFile)
   , make_ord_flag defGhcFlag "main-is"              (SepArg setMainIs)
@@ -3007,7 +3082,8 @@ dynamic_flags_deps = [
                   setGeneralFlag Opt_SuppressIdInfo
                   setGeneralFlag Opt_SuppressTicks
                   setGeneralFlag Opt_SuppressStgFreeVars
-                  setGeneralFlag Opt_SuppressTypeSignatures)
+                  setGeneralFlag Opt_SuppressTypeSignatures
+                  setGeneralFlag Opt_SuppressTimestamps)
 
         ------ Debugging ----------------------------------------------------
   , make_ord_flag defGhcFlag "dstg-stats"
@@ -3298,6 +3374,14 @@ dynamic_flags_deps = [
       (intSuffix (\n d -> d { maxValidSubstitutions = Just n }))
   , make_ord_flag defFlag "fno-max-valid-substitutions"
       (noArg (\d -> d { maxValidSubstitutions = Nothing }))
+  , make_ord_flag defFlag "fmax-refinement-substitutions"
+      (intSuffix (\n d -> d { maxRefSubstitutions = Just n }))
+  , make_ord_flag defFlag "fno-max-refinement-substitutions"
+      (noArg (\d -> d { maxRefSubstitutions = Nothing }))
+  , make_ord_flag defFlag "frefinement-level-substitutions"
+      (intSuffix (\n d -> d { refLevelSubstitutions = Just n }))
+  , make_ord_flag defFlag "fno-refinement-level-substitutions"
+      (noArg (\d -> d { refLevelSubstitutions = Nothing }))
   , make_ord_flag defFlag "fmax-uncovered-patterns"
       (intSuffix (\n d -> d { maxUncoveredPatterns = n }))
   , make_ord_flag defFlag "fsimplifier-phases"
@@ -3324,6 +3408,8 @@ dynamic_flags_deps = [
       (noArg (\d -> d { liberateCaseThreshold = Nothing }))
   , make_ord_flag defFlag "drule-check"
       (sepArg (\s d -> d { ruleCheck = Just s }))
+  , make_ord_flag defFlag "dinline-check"
+      (sepArg (\s d -> d { inlineCheck = Just s }))
   , make_ord_flag defFlag "freduction-depth"
       (intSuffix (\n d -> d { reductionDepth = treatZeroAsInf n }))
   , make_ord_flag defFlag "fconstraint-solver-iterations"
@@ -3794,10 +3880,12 @@ dFlagsDeps = [
   flagSpec "suppress-idinfo"            Opt_SuppressIdInfo,
   flagSpec "suppress-unfoldings"        Opt_SuppressUnfoldings,
   flagSpec "suppress-module-prefixes"   Opt_SuppressModulePrefixes,
+  flagSpec "suppress-timestamps"        Opt_SuppressTimestamps,
   flagSpec "suppress-type-applications" Opt_SuppressTypeApplications,
   flagSpec "suppress-type-signatures"   Opt_SuppressTypeSignatures,
   flagSpec "suppress-uniques"           Opt_SuppressUniques,
-  flagSpec "suppress-var-kinds"         Opt_SuppressVarKinds]
+  flagSpec "suppress-var-kinds"         Opt_SuppressVarKinds
+  ]
 
 -- | These @-f\<blah\>@ flags can all be reversed with @-fno-\<blah\>@
 fFlags :: [FlagSpec GeneralFlag]
@@ -3808,6 +3896,7 @@ fFlagsDeps = [
 -- See Note [Updating flag description in the User's Guide]
 -- See Note [Supporting CLI completion]
 -- Please keep the list of flags below sorted alphabetically
+  flagSpec "asm-shortcutting"                 Opt_AsmShortcutting,
   flagGhciSpec "break-on-error"               Opt_BreakOnError,
   flagGhciSpec "break-on-exception"           Opt_BreakOnException,
   flagSpec "building-cabal-package"           Opt_BuildingCabalPackage,
@@ -3835,6 +3924,7 @@ fFlagsDeps = [
   flagSpec "error-spans"                      Opt_ErrorSpans,
   flagSpec "excess-precision"                 Opt_ExcessPrecision,
   flagSpec "expose-all-unfoldings"            Opt_ExposeAllUnfoldings,
+  flagSpec "external-dynamic-refs"            Opt_ExternalDynamicRefs,
   flagSpec "external-interpreter"             Opt_ExternalInterpreter,
   flagSpec "flat-cache"                       Opt_FlatCache,
   flagSpec "float-in"                         Opt_FloatIn,
@@ -3857,6 +3947,7 @@ fFlagsDeps = [
   flagSpec "kill-absence"                     Opt_KillAbsence,
   flagSpec "kill-one-shot"                    Opt_KillOneShot,
   flagSpec "late-dmd-anal"                    Opt_LateDmdAnal,
+  flagSpec "late-specialise"                  Opt_LateSpecialise,
   flagSpec "liberate-case"                    Opt_LiberateCase,
   flagSpec "llvm-pass-vectors-in-regs"        Opt_LlvmPassVectorsInRegisters,
   flagHiddenSpec "llvm-tbaa"                  Opt_LlvmTBAA,
@@ -3907,11 +3998,14 @@ fFlagsDeps = [
   flagSpec "solve-constant-dicts"             Opt_SolveConstantDicts,
   flagSpec "catch-bottoms"                    Opt_CatchBottoms,
   flagSpec "alignment-sanitisation"           Opt_AlignmentSanitisation,
+  flagSpec "num-constant-folding"             Opt_NumConstantFolding,
   flagSpec "show-warning-groups"              Opt_ShowWarnGroups,
   flagSpec "hide-source-paths"                Opt_HideSourcePaths,
   flagSpec "show-hole-constraints"            Opt_ShowHoleConstraints,
   flagSpec "no-show-valid-substitutions"      Opt_NoShowValidSubstitutions,
   flagSpec "no-sort-valid-substitutions"      Opt_NoSortValidSubstitutions,
+  flagSpec "abstract-refinement-substitutions" Opt_AbstractRefSubstitutions,
+  flagSpec "unclutter-valid-substitutions"    Opt_UnclutterValidSubstitutions,
   flagSpec "show-loaded-modules"              Opt_ShowLoadedModules,
   flagSpec "whole-archive-hs-libs"            Opt_WholeArchiveHsLibs
   ]
@@ -4049,6 +4143,8 @@ xFlagsDeps = [
   flagSpec "GADTs"                            LangExt.GADTs,
   flagSpec "GHCForeignImportPrim"             LangExt.GHCForeignImportPrim,
   flagSpec' "GeneralizedNewtypeDeriving"      LangExt.GeneralizedNewtypeDeriving
+                                              setGenDeriving,
+  flagSpec' "GeneralisedNewtypeDeriving"      LangExt.GeneralizedNewtypeDeriving
                                               setGenDeriving,
   flagSpec "ImplicitParams"                   LangExt.ImplicitParams,
   flagSpec "ImplicitPrelude"                  LangExt.ImplicitPrelude,
@@ -4253,14 +4349,11 @@ impliedXFlags
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 --
 -- If you change the list of flags enabled for particular optimisation levels
--- please remember to update the User's Guide. The relevant files are:
+-- please remember to update the User's Guide. The relevant file is:
 --
 --   docs/users_guide/using-optimisation.rst
 --
--- The first contains the Flag Reference section, which briefly lists all
--- available flags. The second contains a detailed description of the
--- flags. Both places should contain information whether a flag is implied by
--- -O0, -O or -O2.
+-- Make sure to note whether a flag is implied by -O0, -O or -O2.
 
 optLevelFlags :: [([Int], GeneralFlag)]
 optLevelFlags -- see Note [Documenting optimisation flags]
@@ -4282,6 +4375,7 @@ optLevelFlags -- see Note [Documenting optimisation flags]
     , ([1,2],   Opt_CaseMerge)
     , ([1,2],   Opt_CaseFolding)
     , ([1,2],   Opt_CmmElimCommonBlocks)
+    , ([2],     Opt_AsmShortcutting)
     , ([1,2],   Opt_CmmSink)
     , ([1,2],   Opt_CSE)
     , ([1,2],   Opt_StgCSE)
@@ -4298,6 +4392,7 @@ optLevelFlags -- see Note [Documenting optimisation flags]
     , ([1,2],   Opt_CprAnal)
     , ([1,2],   Opt_WorkerWrapper)
     , ([1,2],   Opt_SolveConstantDicts)
+    , ([1,2],   Opt_NumConstantFolding)
 
     , ([2],     Opt_LiberateCase)
     , ([2],     Opt_SpecConstr)
@@ -5040,7 +5135,8 @@ addLibraryPath p =
   upd (\s -> s{libraryPaths = libraryPaths s ++ splitPathList p})
 
 addIncludePath p =
-  upd (\s -> s{includePaths = includePaths s ++ splitPathList p})
+  upd (\s -> s{includePaths =
+                  addGlobalInclude (includePaths s) (splitPathList p)})
 
 addFrameworkPath p =
   upd (\s -> s{frameworkPaths = frameworkPaths s ++ splitPathList p})

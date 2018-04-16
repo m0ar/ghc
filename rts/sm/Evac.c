@@ -704,9 +704,6 @@ loop:
   case THUNK_1_1:
   case THUNK_2_0:
   case THUNK_0_2:
-#if defined(NO_PROMOTE_THUNKS)
-#error bitrotted
-#endif
     copy(p,info,q,sizeofW(StgThunk)+2,gen_no);
     return;
 
@@ -750,6 +747,19 @@ loop:
               copy(p,info,q,sizeofW(StgInd),gen_no);
               return;
           }
+          // Note [BLACKHOLE pointing to IND]
+          //
+          // BLOCKING_QUEUE can be overwritten by IND (see
+          // wakeBlockingQueue()). However, when this happens we must
+          // be updating the BLACKHOLE, so the BLACKHOLE's indirectee
+          // should now point to the value.
+          //
+          // The mutator might observe an inconsistent state, because
+          // the writes are happening in another thread, so it's
+          // possible for the mutator to follow an indirectee and find
+          // an IND. But this should never happen in the GC, because
+          // the mutators are all stopped and the writes have
+          // completed.
           ASSERT(i != &stg_IND_info);
       }
       q = r;
@@ -1061,9 +1071,14 @@ selector_chain:
     // In threaded mode, we'll use WHITEHOLE to lock the selector
     // thunk while we evaluate it.
     {
-        do {
+        while(true) {
             info_ptr = xchg((StgPtr)&p->header.info, (W_)&stg_WHITEHOLE_info);
-        } while (info_ptr == (W_)&stg_WHITEHOLE_info);
+            if (info_ptr != (W_)&stg_WHITEHOLE_info) { break; }
+#if defined(PROF_SPIN)
+            ++whitehole_gc_spin;
+#endif
+            busy_wait_nop();
+        }
 
         // make sure someone else didn't get here first...
         if (IS_FORWARDING_PTR(info_ptr) ||
