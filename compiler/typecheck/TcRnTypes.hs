@@ -702,10 +702,8 @@ data TcGblEnv
         -- See Note [Constraints in static forms].
         tcg_complete_matches :: [CompleteMatch],
 
-        tcg_ann_from_parser :: WeightMap
+        tcg_ann_from_parser :: Map SrcSpan Weight
     }
-
-type WeightMap = Map SrcSpan [Weight]
 
 -- NB: topModIdentity, not topModSemantic!
 -- Definition sites of orphan identities will be identity modules, not semantic

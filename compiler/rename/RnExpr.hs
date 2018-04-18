@@ -1587,7 +1587,7 @@ mkStmtTreeHeuristic stmts =
 -- | Turn a sequence of statements into an ExprStmtTree optimally,
 -- using dynamic programming.  /O(n^3)/
 mkStmtTreeOptimal :: [(ExprLStmt GhcRn, FreeVars)] ->
-                     Map.Map SrcSpan [Weight] ->
+                     Map.Map SrcSpan Weight ->
                      ExprStmtTree
 mkStmtTreeOptimal stmts weightMap =
   ASSERT(not (null stmts)) -- the empty case is handled by the caller;
@@ -1644,12 +1644,11 @@ mkStmtTreeOptimal stmts weightMap =
          -- weight. If none annotated, default to unit weight.
          getCurrentWeight :: Int -> Int
          getCurrentWeight sIx = case stmts !! sIx of
-              (L ss _, _) -> check ss $ Map.lookup ss weightMap
+              (L ss _, _) -> checkUnit $ Map.lookup ss weightMap
             where
-              check :: SrcSpan -> Maybe [Weight] -> Int
-              check _ Nothing = 1
-              check _ (Just [Weight w]) = fromIntegral w
-              check ss (Just ws) = panic $ "Several weighs on SrcSpan:\n" ++ show ss
+              checkUnit :: Maybe Weight -> Int
+              checkUnit Nothing = 1
+              checkUnit (Just (Weight w)) = fromIntegral w
 
          !() = unsafePrint $ "AdoStm: "
                     ++ "(" ++ (show lo) ++ " / " ++ (show hi)++ ") :: "

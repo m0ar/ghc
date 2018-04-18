@@ -3767,7 +3767,7 @@ aw (Just w) a@(L l _)  = addWeightAt l w >> return a
 
 addWeightAt :: SrcSpan -> Weight -> P ()
 addWeightAt ss w = P $ \s -> POk s {
-    weight_anns = (ss,[w]) : weight_anns s
+    weight_anns = (ss,w) : weight_anns s
   } ()
 
 -- |Add all [AddAnn] to an AST element wrapped in a Just

@@ -133,7 +133,7 @@ https://ghc.haskell.org/trac/ghc/wiki/ApiAnnotations
 -- If you update this, update the Note [Api annotations] above
 type ApiAnns = ( Map.Map ApiAnnKey [SrcSpan]
                , Map.Map SrcSpan [Located AnnotationComment]
-               , Map.Map SrcSpan [Weight])
+               , Map.Map SrcSpan Weight)
 
 -- If you update this, update the Note [Api annotations] above
 type ApiAnnKey = (SrcSpan,AnnKeywordId)
@@ -176,9 +176,6 @@ getAndRemoveAnnotationComments (anns,canns,ws) span =
     Just cs -> (cs,(anns,Map.delete span canns,ws))
     Nothing -> ([],(anns,canns,ws))
 
-
-getWeights :: ApiAnns -> SrcSpan -> Maybe [Weight]
-getWeights (_,_,ws) ss = Map.lookup ss ws
 -- --------------------------------------------------------------------
 
 -- | API Annotations exist so that tools can perform source to source
