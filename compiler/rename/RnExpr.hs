@@ -1658,8 +1658,8 @@ mkStmtTreeOptimal stmts annMap =
                   (BindStmt _ (L _ expr) _ _ _) -> getExpNameMaybe expr
                   _ -> Nothing
               getExpNameMaybe :: HsExpr GhcRn -> Maybe Name
-              getExpNameMaybe (HsApp (L _ expr) _) = getExpNameMaybe expr
-              getExpNameMaybe (HsVar (L _ name))   = Just name
+              getExpNameMaybe (HsApp _ (L _ expr) _) = getExpNameMaybe expr
+              getExpNameMaybe (HsVar _ (L _ name))   = Just name
               getExpNameMaybe _ = Nothing
 
          getCurrentWeight :: Int -> Maybe Integer
@@ -1669,20 +1669,20 @@ mkStmtTreeOptimal stmts annMap =
               getWeightExpr i = join $ (flip Map.lookup annMap . nameOccName) <$> getCurrentName i
 
               getWeightFromWeightExpr :: HsExpr GhcPs -> Maybe Integer
-              getWeightFromWeightExpr (HsPar (L _ exp)) = getWeightFromWeightExpr exp -- Remove parentheses
-              getWeightFromWeightExpr (HsApp (L _ varExp) (L _ valExp))
+              getWeightFromWeightExpr (HsPar _ (L _ exp)) = getWeightFromWeightExpr exp -- Remove parentheses
+              getWeightFromWeightExpr (HsApp _ (L _ varExp) (L _ valExp))
                 | maybe False isValidWeightRdrName $ extractRdrName varExp
                               = getWeightFromWeightExpr valExp -- Get the integer value
                 | otherwise   = Nothing
-              getWeightFromWeightExpr (HsOverLit overLit) =
+              getWeightFromWeightExpr (HsOverLit _ overLit) =
                               case ol_val overLit of -- Convert to integer
                               HsIntegral i -> Just $ il_value i
                               _            -> Nothing
               getWeightFromWeightExpr _  = Nothing
 
               extractRdrName :: HsExpr GhcPs -> Maybe RdrName
-              extractRdrName (HsPar (L _ e))    = extractRdrName e
-              extractRdrName (HsVar (L _ name)) = Just name
+              extractRdrName (HsPar _ (L _ e))    = extractRdrName e
+              extractRdrName (HsVar _ (L _ name)) = Just name
               extractRdrName _                  = Nothing
 
               -- TODO: Make this safer
