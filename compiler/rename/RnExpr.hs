@@ -1594,7 +1594,6 @@ mkStmtTreeOptimal stmts weightMap =
                            -- we don't support empty StmtTrees.
   fst (arr ! (0,n))
   where
-    !() = unsafePrint $ "weightMap size:"  ++ (show $ Map.size weightMap)
     n = length stmts - 1
     stmt_arr = listArray (0,n) stmts
 
@@ -1613,16 +1612,11 @@ mkStmtTreeOptimal stmts weightMap =
          case segments stms of
            [] -> panic "mkStmtTree"
            [_one] -> split lo hi
-           segs -> let costAfter = maximum costs in
-                   let !() = unsafePrint $ "CostBefore:" ++ (show costBefore) in
-                   let !() = unsafePrint $ "CostAfter:" ++ (show costAfter) in
-                   if costBefore > costAfter
-                   then (StmtTreeApplicative trees, maximum costs)
-                   else splitBeforeSegmentation
+           segs -> let !() = unsafePrint $ "Found cost:" ++ (show (maximum costs))
+                   in (StmtTreeApplicative trees, maximum costs)
              where
                bounds = scanl (\(_,hi) a -> (hi+1, hi + length a)) (0,lo-1) segs
                (trees,costs) = unzip (map (uncurry split) (tail bounds))
-               splitBeforeSegmentation@(_,costBefore) = split lo hi
 
     -- find the best place to split the segment [lo..hi]
     split :: Int -> Int -> (ExprStmtTree, Cost)
@@ -1649,13 +1643,6 @@ mkStmtTreeOptimal stmts weightMap =
               checkUnit :: Maybe Weight -> Int
               checkUnit Nothing = 1
               checkUnit (Just (Weight w)) = fromIntegral w
-
-         !() = unsafePrint $ "AdoStm: "
-                    ++ "(" ++ (show lo) ++ " / " ++ (show hi)++ ") :: "
-                    ++ (show lo) ++ " / "
-                    ++ (show hi) ++ " :: "
-                    ++ (show $ getCurrentWeight lo) ++ " / "
-                    ++ (show $ getCurrentWeight hi)
 
          loCost = getCurrentWeight lo
          hiCost = getCurrentWeight hi
