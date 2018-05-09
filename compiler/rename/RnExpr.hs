@@ -15,6 +15,7 @@ free variables.
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE StandaloneDeriving #-}
 
 module RnExpr (
         rnLExpr, rnExpr, rnStmts
@@ -1569,6 +1570,7 @@ flattenStmtTree t = go t []
 
 type ExprStmtTree = StmtTree (ExprLStmt GhcRn, FreeVars)
 type Cost = Int
+deriving instance Show Weight
 
 -- | Turn a sequence of statements into an ExprStmtTree using a
 -- heuristic algorithm.  /O(n^2)/
@@ -1592,7 +1594,9 @@ mkStmtTreeOptimal :: [(ExprLStmt GhcRn, FreeVars)] ->
 mkStmtTreeOptimal stmts weightMap =
   ASSERT(not (null stmts)) -- the empty case is handled by the caller;
                            -- we don't support empty StmtTrees.
-  fst (arr ! (0,n))
+  let !() = unsafePrint $ "→→→ Calling for optimal. #Stms: " ++ (show (n+1)) ++ " ←←←"
+      !() = unsafePrint $ show weightMap
+  in fst (arr ! (0,n))
   where
     n = length stmts - 1
     stmt_arr = listArray (0,n) stmts
@@ -1606,14 +1610,18 @@ mkStmtTreeOptimal stmts weightMap =
 
     -- compute the optimal tree for the sequence [lo..hi]
     tree lo hi
-      | hi == lo = (StmtTreeOne (stmt_arr ! lo), 1)
+      | hi == lo = (StmtTreeOne (stmt_arr ! lo), getCurrentWeight lo)
       | otherwise =
          let stms = [ stmt_arr ! i | i <- [lo..hi] ] in
          case segments stms of
            [] -> panic "mkStmtTree"
-           [_one] -> split lo hi
-           segs -> let !() = unsafePrint $ "Found cost:" ++ (show (maximum costs))
-                   in (StmtTreeApplicative trees, maximum costs)
+           [_one] -> let (tree, cost) = split lo hi
+                         !() | lo == 0 && hi == n = unsafePrint $ "Found upper split cost:" ++ (show cost)
+                             | otherwise          = unsafePrint $ "Split cost:" ++ (show cost)
+                     in (tree,cost)
+           segs ->   let !() | lo == 0 && hi == n = unsafePrint $ "Found upper seg cost:" ++ (show (maximum costs))
+                             | otherwise          = unsafePrint $ "Seg cost:" ++ (show (maximum costs))
+                     in (StmtTreeApplicative trees, maximum costs)
              where
                bounds = scanl (\(_,hi) a -> (hi+1, hi + length a)) (0,lo-1) segs
                (trees,costs) = unzip (map (uncurry split) (tail bounds))
@@ -1622,7 +1630,9 @@ mkStmtTreeOptimal stmts weightMap =
     split :: Int -> Int -> (ExprStmtTree, Cost)
     split lo hi
       | hi == lo = (StmtTreeOne (stmt_arr ! lo), loCost)
-      | otherwise = (StmtTreeBind before after, c1+c2)
+      | otherwise = let !() | lo == 0 && hi == n = unsafePrint $ "First split→ costOne: " ++ (show c1) ++ " costTwo: " ++ (show c2)
+                            | otherwise          = unsafePrint $ "Split→ costOne: " ++ (show c1) ++ " costTwo: " ++ (show c2)
+                    in (StmtTreeBind before after, c1+c2)
         where
          -- As per the paper, for a sequence s1...sn, we want to find
          -- the split with the minimum cost, where the cost is the
@@ -1634,18 +1644,22 @@ mkStmtTreeOptimal stmts weightMap =
          -- in the case that these two have the same cost do we need
          -- to do the exhaustive search.
 
-         -- First arg is the stmt index, returns corresponding
-         -- weight. If none annotated, default to unit weight.
-         getCurrentWeight :: Int -> Int
-         getCurrentWeight sIx = case stmts !! sIx of
-              (L ss _, _) -> checkUnit $ Map.lookup ss weightMap
-            where
-              checkUnit :: Maybe Weight -> Int
-              checkUnit Nothing = 1
-              checkUnit (Just (Weight w)) = fromIntegral w
+	 -- This optimisation does not work. Given the example program:
+	 -- do
+	 --   x1 <- a  {-# Weight 4 #-}
+	 --   x2 <- b x1 {-# Weight 4 #-}
+	 --   x3 <- c {-# Weight 4 #-}
+	 --   x4 <- d x3 {-# Weight 1 #-}
+	 --   x5 <- e x1 x4 {-# Weight 1 #-}
+	 --
+	 --   We know: rearrange (a - d) > rearrange (b - e)
+	 --   But: Since e is shorter than a
+	 --   the argument don't hold.
 
          loCost = getCurrentWeight lo
          hiCost = getCurrentWeight hi
+         cost0 = getCurrentWeight 0
+         costn = getCurrentWeight n
          ((before,c1),(after,c2))
            | hi - lo == 1
            = ((StmtTreeOne (stmt_arr ! lo), loCost),
@@ -1661,6 +1675,16 @@ mkStmtTreeOptimal stmts weightMap =
              cost ((_,c1),(_,c2)) = c1 + c2
              alternatives = [ (arr ! (lo,k), arr ! (k+1,hi))
                             | k <- [lo .. hi-1] ]
+
+    -- First arg is the stmt index, returns corresponding
+    -- weight. If none annotated, default to unit weight.
+    getCurrentWeight :: Int -> Int
+    getCurrentWeight sIx = case stmts !! sIx of
+        (L ss _, _) -> checkUnit $ Map.lookup ss weightMap
+      where
+        checkUnit :: Maybe Weight -> Int
+        checkUnit Nothing = let !() = unsafePrint $ "No cost yo:" ++ (show n) in 1
+        checkUnit (Just (Weight w)) = fromIntegral w
 
 -- | Turn the ExprStmtTree back into a sequence of statements, using
 -- ApplicativeStmt where necessary.
