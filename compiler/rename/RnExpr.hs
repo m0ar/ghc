@@ -1664,9 +1664,9 @@ mkStmtTreeOptimal stmts weightMap =
            | hi - lo == 1
            = ((StmtTreeOne (stmt_arr ! lo), loCost),
               (StmtTreeOne (stmt_arr ! hi), hiCost))
-           | left_cost < right_cost
+           | cost0 == costn && left_cost < right_cost
            = ((left,left_cost), (StmtTreeOne (stmt_arr ! hi), hiCost))
-           | left_cost > right_cost
+           | cost0 == costn && left_cost > right_cost
            = ((StmtTreeOne (stmt_arr ! lo), loCost), (right,right_cost))
            | otherwise = minimumBy (comparing cost) alternatives
            where
